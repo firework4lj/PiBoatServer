@@ -1,0 +1,14 @@
+{
+  "name": "piboatserver",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Central Node.js telemetry server for PiBoatCore heartbeats.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
