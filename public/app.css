@@ -240,9 +240,36 @@ dd {
   font-size: 0.96rem;
 }
 
-.devices {
+.devices,
+.camera {
   display: grid;
   gap: 10px;
+}
+
+.camera {
+  margin-top: 24px;
+}
+
+.section-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-heading span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+#snapshot {
+  aspect-ratio: 16 / 9;
+  background: #e7ecef;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: none;
+  object-fit: cover;
+  width: 100%;
 }
 
 .device-row {

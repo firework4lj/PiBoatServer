@@ -31,6 +31,29 @@ export function readJson(req, { maxBodyBytes }) {
   });
 }
 
+export function readBody(req, { maxBodyBytes }) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let totalBytes = 0;
+
+    req.on("data", (chunk) => {
+      totalBytes += chunk.length;
+      if (totalBytes > maxBodyBytes) {
+        reject(Object.assign(new Error("request body too large"), { statusCode: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on("end", () => {
+      resolve(Buffer.concat(chunks));
+    });
+
+    req.on("error", reject);
+  });
+}
+
 export function requireBearerToken(req, apiToken) {
   if (!apiToken) {
     return true;

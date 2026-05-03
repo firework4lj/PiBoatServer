@@ -8,6 +8,8 @@ const elements = {
   signal: document.querySelector("#signal"),
   uptime: document.querySelector("#uptime"),
   devices: document.querySelector("#devices"),
+  snapshot: document.querySelector("#snapshot"),
+  snapshotTime: document.querySelector("#snapshotTime"),
 };
 
 const map = L.map("map", { zoomControl: true }).setView([45.58809, -122.7044], 14);
@@ -38,6 +40,7 @@ async function refresh() {
 
   selectedBoatId ||= boats.boats[0].boat_id;
   const latest = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/latest`);
+  const snapshot = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/snapshot/latest`);
   const records = Object.values(latest.devices);
   const newest = records.sort((a, b) => new Date(b.received_at) - new Date(a.received_at))[0];
 
@@ -46,7 +49,7 @@ async function refresh() {
     return;
   }
 
-  renderDashboard(newest, records);
+  renderDashboard(newest, records, snapshot.snapshot);
 }
 
 async function fetchJson(path) {
@@ -57,7 +60,7 @@ async function fetchJson(path) {
   return response.json();
 }
 
-function renderDashboard(record, records) {
+function renderDashboard(record, records, snapshot) {
   const sim7600 = record.sensors?.sim7600 || {};
   const gnss = sim7600.gnss || {};
   const system = record.sensors?.system || {};
@@ -72,6 +75,7 @@ function renderDashboard(record, records) {
   elements.signal.textContent = formatSignal(sim7600.signal?.rssi_dbm);
   elements.uptime.textContent = formatDuration(system.uptime_seconds);
   renderDevices(records);
+  renderSnapshot(snapshot);
 
   if (position) {
     if (!marker) {
@@ -81,6 +85,18 @@ function renderDashboard(record, records) {
       marker.setLatLng([position.latitude, position.longitude]);
     }
   }
+}
+
+function renderSnapshot(snapshot) {
+  if (!snapshot?.image_url) {
+    elements.snapshot.style.display = "none";
+    elements.snapshotTime.textContent = "--";
+    return;
+  }
+
+  elements.snapshot.style.display = "block";
+  elements.snapshot.src = `${snapshot.image_url}?t=${encodeURIComponent(snapshot.received_at)}`;
+  elements.snapshotTime.textContent = formatDate(snapshot.received_at);
 }
 
 function renderDevices(records) {

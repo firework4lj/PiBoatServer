@@ -1,4 +1,4 @@
-import { readJson, requireBearerToken, sendJson } from "./http.js";
+import { readBody, readJson, requireBearerToken, sendJson } from "./http.js";
 import { normalizeHeartbeat, validateHeartbeat } from "./heartbeat.js";
 import { sendStatic } from "./static.js";
 
@@ -21,6 +21,11 @@ export function createRouter({ config, store }) {
         return;
       }
 
+      if (req.method === "POST" && url.pathname === "/api/snapshot") {
+        await handleSnapshot(req, res, { config, store });
+        return;
+      }
+
       const latestMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/latest$/);
       if (req.method === "GET" && latestMatch) {
         const boatId = decodeURIComponent(latestMatch[1]);
@@ -36,6 +41,31 @@ export function createRouter({ config, store }) {
         return;
       }
 
+      const snapshotLatestMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/snapshot\/latest$/);
+      if (req.method === "GET" && snapshotLatestMatch) {
+        const boatId = decodeURIComponent(snapshotLatestMatch[1]);
+        sendJson(res, 200, { boat_id: boatId, snapshot: await store.latestSnapshotForBoat(boatId) });
+        return;
+      }
+
+      const snapshotImageMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/devices\/([^/]+)\/snapshot\.jpg$/);
+      if (req.method === "GET" && snapshotImageMatch) {
+        const boatId = decodeURIComponent(snapshotImageMatch[1]);
+        const deviceId = decodeURIComponent(snapshotImageMatch[2]);
+        const image = await store.snapshotImage(boatId, deviceId);
+        if (!image) {
+          sendJson(res, 404, { error: "snapshot not found" });
+          return;
+        }
+        res.writeHead(200, {
+          "Content-Type": "image/jpeg",
+          "Content-Length": image.length,
+          "Cache-Control": "no-cache",
+        });
+        res.end(image);
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/api/boats") {
         sendJson(res, 200, { boats: await store.listBoats() });
         return;
@@ -47,6 +77,54 @@ export function createRouter({ config, store }) {
       sendJson(res, 500, { error: "internal server error" });
     }
   };
+}
+
+async function handleSnapshot(req, res, { config, store }) {
+  if (!requireBearerToken(req, config.apiToken)) {
+    sendJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+
+  if (!req.headers["content-type"]?.startsWith("image/jpeg")) {
+    sendJson(res, 415, { error: "snapshot must be image/jpeg" });
+    return;
+  }
+
+  const boatId = req.headers["x-boat-id"];
+  const deviceId = req.headers["x-device-id"];
+  const sentAt = req.headers["x-sent-at"];
+  if (!boatId || !deviceId || !sentAt || Number.isNaN(Date.parse(sentAt))) {
+    sendJson(res, 400, { error: "snapshot metadata headers are required" });
+    return;
+  }
+
+  let image;
+  try {
+    image = await readBody(req, { maxBodyBytes: config.maxSnapshotBytes });
+  } catch (error) {
+    sendJson(res, error.statusCode || 400, { error: error.message || "invalid snapshot body" });
+    return;
+  }
+
+  const metadata = await store.saveSnapshot({
+    boatId,
+    deviceId,
+    sentAt,
+    receivedAt: new Date().toISOString(),
+    image,
+  });
+
+  console.log(
+    JSON.stringify({
+      event: "snapshot.received",
+      boat_id: boatId,
+      device_id: deviceId,
+      bytes: image.length,
+      received_at: metadata.received_at,
+    }),
+  );
+
+  sendJson(res, 202, { status: "accepted", snapshot: metadata });
 }
 
 async function handleHeartbeat(req, res, { config, store }) {

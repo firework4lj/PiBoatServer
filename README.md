@@ -27,6 +27,7 @@ See `.env.example`.
 - `HOST`: bind address
 - `DATA_DIR`: directory for JSONL history and latest index
 - `MAX_BODY_BYTES`: maximum request body size
+- `MAX_SNAPSHOT_BYTES`: maximum camera snapshot size
 - `API_TOKEN`: optional bearer token required for `POST /api/heartbeat`
 
 ## API
@@ -56,6 +57,20 @@ Returns latest heartbeat records for a boat, keyed by device id.
 ### `GET /api/boats/:boatId/history?limit=100`
 
 Returns recent heartbeat history for a boat.
+
+### `POST /api/snapshot`
+
+Accepts a JPEG snapshot from PiBoatCore. Requires the same bearer token as
+heartbeat ingestion when `API_TOKEN` is set.
+
+Required headers:
+
+```text
+Content-Type: image/jpeg
+X-Boat-Id: my-boat
+X-Device-Id: raspberry-pi-bridge
+X-Sent-At: 2026-05-03T12:00:00Z
+```
 
 ## Data Files
 
