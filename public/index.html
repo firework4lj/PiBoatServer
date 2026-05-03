@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PiBoatServer</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIINfQPDQOVZ6j7kq5I7H1D/8L9d8bR3Xo0="
+      crossorigin=""
+    >
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="map-region" aria-label="Boat map">
+        <div id="map"></div>
+      </section>
+
+      <aside class="panel" aria-label="Boat status">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">PiBoatServer</p>
+            <h1 id="boatName">Boat</h1>
+          </div>
+          <div id="statusPill" class="status-pill">Waiting</div>
+        </header>
+
+        <dl class="stats">
+          <div>
+            <dt>Last Seen</dt>
+            <dd id="lastSeen">--</dd>
+          </div>
+          <div>
+            <dt>Position</dt>
+            <dd id="position">--</dd>
+          </div>
+          <div>
+            <dt>Speed</dt>
+            <dd id="speed">--</dd>
+          </div>
+          <div>
+            <dt>Cellular</dt>
+            <dd id="cellular">--</dd>
+          </div>
+          <div>
+            <dt>Signal</dt>
+            <dd id="signal">--</dd>
+          </div>
+          <div>
+            <dt>Uptime</dt>
+            <dd id="uptime">--</dd>
+          </div>
+        </dl>
+
+        <section class="devices" aria-label="Devices">
+          <h2>Devices</h2>
+          <div id="devices"></div>
+        </section>
+      </aside>
+    </main>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

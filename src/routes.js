@@ -1,11 +1,16 @@
 import { readJson, requireBearerToken, sendJson } from "./http.js";
 import { normalizeHeartbeat, validateHeartbeat } from "./heartbeat.js";
+import { sendStatic } from "./static.js";
 
 export function createRouter({ config, store }) {
   return async function route(req, res) {
     const url = new URL(req.url, "http://localhost");
 
     try {
+      if (req.method === "GET" && await sendStatic(res, url.pathname)) {
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/health") {
         sendJson(res, 200, { status: "ok" });
         return;

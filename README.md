@@ -17,6 +17,8 @@ npm start
 
 The server listens on `http://0.0.0.0:3000` by default.
 
+Visit `/` to view the basic boat dashboard.
+
 ## Environment
 
 See `.env.example`.
