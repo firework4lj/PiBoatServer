@@ -13,8 +13,11 @@ const elements = {
 const map = L.map("map", { zoomControl: true }).setView([45.58809, -122.7044], 14);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19,
+  tileSize: 256,
+  zoomOffset: 0,
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
 }).addTo(map);
+setTimeout(() => map.invalidateSize(), 0);
 
 const boatIcon = L.divIcon({
   className: "",
