@@ -241,12 +241,14 @@ dd {
 }
 
 .devices,
-.camera {
+.camera,
+.voltage-chart {
   display: grid;
   gap: 10px;
 }
 
-.camera {
+.camera,
+.voltage-chart {
   margin-top: 24px;
 }
 
@@ -269,6 +271,14 @@ dd {
   border-radius: 8px;
   display: none;
   object-fit: cover;
+  width: 100%;
+}
+
+#voltageChart {
+  background: #fbfcfc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  height: 150px;
   width: 100%;
 }
 

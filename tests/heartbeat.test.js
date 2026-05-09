@@ -46,7 +46,7 @@ test("normalizeHeartbeat trims ids and adds received_at", () => {
 
 test("validateHeartbeat accepts compact telemetry payloads", () => {
   const errors = validateHeartbeat({
-    t: "1,lukas-glasply,pi-bridge-1,6,2026-05-03T04:42:57Z,ok,ok,150.8,ok,0,-85,1,Dark Star,LTE,1,45.5880914,-122.7043979,0,,22.8",
+    t: "1,lukas-glasply,pi-bridge-1,6,2026-05-03T04:42:57Z,ok,ok,150.8,ok,0,-85,1,Dark Star,LTE,1,45.5880914,-122.7043979,0,,22.8,ok,12.7,0,100",
   });
 
   assert.deepEqual(errors, []);
@@ -55,7 +55,7 @@ test("validateHeartbeat accepts compact telemetry payloads", () => {
 test("normalizeHeartbeat expands compact telemetry payloads", () => {
   const heartbeat = normalizeHeartbeat(
     {
-      t: "1,lukas-glasply,pi-bridge-1,6,2026-05-03T04:42:57Z,ok,ok,150.8,ok,0,-85,1,Dark Star,LTE,1,45.5880914,-122.7043979,0,,22.8",
+      t: "1,lukas-glasply,pi-bridge-1,6,2026-05-03T04:42:57Z,ok,ok,150.8,ok,0,-85,1,Dark Star,LTE,1,45.5880914,-122.7043979,0,,22.8,ok,12.7,0,100",
     },
     new Date("2026-05-03T04:43:00Z"),
   );
@@ -68,6 +68,9 @@ test("normalizeHeartbeat expands compact telemetry payloads", () => {
   assert.equal(heartbeat.sensors.sim7600.registration.registered, true);
   assert.equal(heartbeat.sensors.sim7600.gnss.latitude, 45.5880914);
   assert.equal(heartbeat.sensors.sim7600.gnss.course_degrees, null);
+  assert.equal(heartbeat.sensors.arduino_voltage.voltage, 12.7);
+  assert.equal(heartbeat.sensors.arduino_voltage.charging, false);
+  assert.equal(heartbeat.sensors.arduino_voltage.soc_estimate_percent, 100);
 });
 
 test("parseCsvLine handles quoted commas", () => {

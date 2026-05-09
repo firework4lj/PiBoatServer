@@ -95,6 +95,10 @@ export function normalizeCompactHeartbeat(payload, receivedAt = new Date()) {
     speedKnots,
     courseDegrees,
     altitudeMeters,
+    voltageStatus,
+    voltage,
+    charging,
+    socEstimatePercent,
   ] = fields;
 
   return {
@@ -133,6 +137,12 @@ export function normalizeCompactHeartbeat(payload, receivedAt = new Date()) {
           course_degrees: numberOrNull(courseDegrees),
           altitude_meters: numberOrNull(altitudeMeters),
         },
+      },
+      arduino_voltage: {
+        status: voltageStatus || "unknown",
+        voltage: numberOrNull(voltage),
+        charging: charging === "1",
+        soc_estimate_percent: numberOrNull(socEstimatePercent),
       },
     },
     received_at: receivedAt.toISOString(),

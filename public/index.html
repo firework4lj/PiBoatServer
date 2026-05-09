@@ -47,6 +47,10 @@
             <dd id="signal">--</dd>
           </div>
           <div>
+            <dt>Battery</dt>
+            <dd id="battery">--</dd>
+          </div>
+          <div>
             <dt>Uptime</dt>
             <dd id="uptime">--</dd>
           </div>
@@ -55,6 +59,14 @@
         <section class="devices" aria-label="Devices">
           <h2>Devices</h2>
           <div id="devices"></div>
+        </section>
+
+        <section class="voltage-chart" aria-label="Battery voltage history">
+          <div class="section-heading">
+            <h2>Voltage</h2>
+            <span id="voltageSummary">--</span>
+          </div>
+          <canvas id="voltageChart" width="672" height="260"></canvas>
         </section>
 
         <section class="camera" aria-label="Camera">
