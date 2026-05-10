@@ -66,6 +66,15 @@
             <h2>Voltage</h2>
             <span id="voltageSummary">--</span>
           </div>
+          <div class="range-tabs" id="voltageRanges" aria-label="Voltage history range">
+            <button type="button" data-range-minutes="5">5m</button>
+            <button type="button" data-range-minutes="30">30m</button>
+            <button type="button" data-range-minutes="60">1h</button>
+            <button type="button" data-range-minutes="180" class="active">3h</button>
+            <button type="button" data-range-minutes="360">6h</button>
+            <button type="button" data-range-minutes="720">12h</button>
+            <button type="button" data-range-minutes="1440">1d</button>
+          </div>
           <canvas id="voltageChart" width="672" height="260"></canvas>
         </section>
 

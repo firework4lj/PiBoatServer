@@ -11,8 +11,19 @@ const elements = {
   devices: document.querySelector("#devices"),
   voltageChart: document.querySelector("#voltageChart"),
   voltageSummary: document.querySelector("#voltageSummary"),
+  voltageRanges: document.querySelector("#voltageRanges"),
   snapshot: document.querySelector("#snapshot"),
   snapshotTime: document.querySelector("#snapshotTime"),
+};
+
+const VOLTAGE_RANGES = {
+  5: { label: "5m", historyLimit: 20 },
+  30: { label: "30m", historyLimit: 90 },
+  60: { label: "1h", historyLimit: 180 },
+  180: { label: "3h", historyLimit: 420 },
+  360: { label: "6h", historyLimit: 840 },
+  720: { label: "12h", historyLimit: 1500 },
+  1440: { label: "1d", historyLimit: 3000 },
 };
 
 const map = L.map("map", { zoomControl: true }).setView([45.58809, -122.7044], 14);
@@ -33,6 +44,18 @@ const boatIcon = L.divIcon({
 
 let marker;
 let selectedBoatId;
+let voltageRangeMinutes = 180;
+
+elements.voltageRanges.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-range-minutes]");
+  if (!button) {
+    return;
+  }
+
+  voltageRangeMinutes = Number(button.dataset.rangeMinutes);
+  setActiveVoltageRange();
+  refresh().catch(console.error);
+});
 
 async function refresh() {
   const boats = await fetchJson("/api/boats");
@@ -43,7 +66,8 @@ async function refresh() {
 
   selectedBoatId ||= boats.boats[0].boat_id;
   const latest = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/latest`);
-  const history = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/history?limit=720`);
+  const historyLimit = VOLTAGE_RANGES[voltageRangeMinutes]?.historyLimit || 420;
+  const history = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/history?limit=${historyLimit}`);
   const snapshot = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/snapshot/latest`);
   const records = Object.values(latest.devices);
   const newest = records.sort((a, b) => new Date(b.received_at) - new Date(a.received_at))[0];
@@ -95,6 +119,7 @@ function renderDashboard(record, records, snapshot, history) {
 }
 
 function renderVoltageChart(history) {
+  const rangeStart = Date.now() - (voltageRangeMinutes * 60 * 1000);
   const points = history
     .map((record) => {
       const battery = record.sensors?.arduino_voltage;
@@ -108,6 +133,7 @@ function renderVoltageChart(history) {
       };
     })
     .filter(Boolean)
+    .filter((point) => point.timestamp >= rangeStart)
     .sort((a, b) => a.timestamp - b.timestamp);
 
   const canvas = elements.voltageChart;
@@ -131,7 +157,8 @@ function drawVoltageChart(ctx, width, height, points) {
   ctx.fillRect(0, 0, width, height);
 
   if (points.length < 2) {
-    elements.voltageSummary.textContent = points.length === 1 ? `${points[0].voltage.toFixed(2)} V` : "No voltage history";
+    const rangeLabel = VOLTAGE_RANGES[voltageRangeMinutes]?.label || `${voltageRangeMinutes}m`;
+    elements.voltageSummary.textContent = points.length === 1 ? `${points[0].voltage.toFixed(2)} V` : `No data in ${rangeLabel}`;
     drawChartText(ctx, "Waiting for voltage history", width / 2, height / 2, "#65717a", "center");
     return;
   }
@@ -144,8 +171,10 @@ function drawVoltageChart(ctx, width, height, points) {
   const firstTime = points[0].timestamp;
   const lastTime = points[points.length - 1].timestamp;
   const current = points[points.length - 1];
+  const delta = current.voltage - points[0].voltage;
+  const deltaLabel = `${delta >= 0 ? "+" : ""}${delta.toFixed(2)} V`;
 
-  elements.voltageSummary.textContent = `${current.voltage.toFixed(2)} V now`;
+  elements.voltageSummary.textContent = `${current.voltage.toFixed(2)} V now (${deltaLabel})`;
 
   drawGrid(ctx, padding, chartWidth, chartHeight, yMin, yMax);
 
@@ -176,6 +205,12 @@ function drawVoltageChart(ctx, width, height, points) {
   drawChartText(ctx, `${yMin.toFixed(1)}V`, 8, padding.top + chartHeight, "#65717a", "left");
   drawChartText(ctx, formatChartTime(firstTime), padding.left, height - 8, "#65717a", "left");
   drawChartText(ctx, formatChartTime(lastTime), width - padding.right, height - 8, "#65717a", "right");
+}
+
+function setActiveVoltageRange() {
+  elements.voltageRanges.querySelectorAll("button").forEach((button) => {
+    button.classList.toggle("active", Number(button.dataset.rangeMinutes) === voltageRangeMinutes);
+  });
 }
 
 function drawGrid(ctx, padding, chartWidth, chartHeight, yMin, yMax) {
@@ -312,4 +347,5 @@ function formatDuration(seconds) {
 }
 
 refresh().catch(console.error);
+setActiveVoltageRange();
 setInterval(() => refresh().catch(console.error), 15000);
