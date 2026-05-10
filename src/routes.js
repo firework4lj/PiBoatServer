@@ -2,6 +2,10 @@ import { readBody, readJson, requireBearerToken, sendJson } from "./http.js";
 import { normalizeHeartbeat, validateHeartbeat } from "./heartbeat.js";
 import { sendStatic } from "./static.js";
 
+const liveCameraSessions = new Map();
+const LIVE_CAMERA_DURATION_MS = 5 * 60 * 1000;
+const LIVE_CAMERA_INTERVAL_SECONDS = 2;
+
 export function createRouter({ config, store }) {
   return async function route(req, res) {
     const url = new URL(req.url, "http://localhost");
@@ -23,6 +27,28 @@ export function createRouter({ config, store }) {
 
       if (req.method === "POST" && url.pathname === "/api/snapshot") {
         await handleSnapshot(req, res, { config, store });
+        return;
+      }
+
+      const liveStartMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/live\/start$/);
+      if (req.method === "POST" && liveStartMatch) {
+        const boatId = decodeURIComponent(liveStartMatch[1]);
+        sendJson(res, 202, startLiveCamera(boatId));
+        return;
+      }
+
+      const liveStopMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/live\/stop$/);
+      if (req.method === "POST" && liveStopMatch) {
+        const boatId = decodeURIComponent(liveStopMatch[1]);
+        liveCameraSessions.delete(boatId);
+        sendJson(res, 202, { active: false });
+        return;
+      }
+
+      const liveStatusMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/live$/);
+      if (req.method === "GET" && liveStatusMatch) {
+        const boatId = decodeURIComponent(liveStatusMatch[1]);
+        sendJson(res, 200, liveCameraStatus(boatId));
         return;
       }
 
@@ -149,6 +175,7 @@ async function handleHeartbeat(req, res, { config, store }) {
 
   const heartbeat = normalizeHeartbeat(payload);
   await store.save(heartbeat);
+  const liveCamera = liveCameraStatus(heartbeat.boat_id);
 
   console.log(
     JSON.stringify({
@@ -161,5 +188,38 @@ async function handleHeartbeat(req, res, { config, store }) {
     }),
   );
 
-  sendJson(res, 202, { status: "accepted" });
+  sendJson(res, 202, {
+    status: "accepted",
+    commands: {
+      camera_live: {
+        active: liveCamera.active,
+        interval_seconds: liveCamera.interval_seconds,
+        until: liveCamera.until,
+      },
+    },
+  });
+}
+
+function startLiveCamera(boatId) {
+  const untilMs = Date.now() + LIVE_CAMERA_DURATION_MS;
+  liveCameraSessions.set(boatId, untilMs);
+  return liveCameraStatus(boatId);
+}
+
+function liveCameraStatus(boatId) {
+  const untilMs = liveCameraSessions.get(boatId);
+  if (!untilMs || untilMs <= Date.now()) {
+    liveCameraSessions.delete(boatId);
+    return {
+      active: false,
+      interval_seconds: null,
+      until: null,
+    };
+  }
+
+  return {
+    active: true,
+    interval_seconds: LIVE_CAMERA_INTERVAL_SECONDS,
+    until: new Date(untilMs).toISOString(),
+  };
 }

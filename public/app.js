@@ -14,6 +14,7 @@ const elements = {
   voltageRanges: document.querySelector("#voltageRanges"),
   snapshot: document.querySelector("#snapshot"),
   snapshotTime: document.querySelector("#snapshotTime"),
+  liveCameraButton: document.querySelector("#liveCameraButton"),
 };
 
 const VOLTAGE_RANGES = {
@@ -45,6 +46,7 @@ const boatIcon = L.divIcon({
 let marker;
 let selectedBoatId;
 let voltageRangeMinutes = 180;
+let liveCameraActive = false;
 
 elements.voltageRanges.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-range-minutes]");
@@ -54,6 +56,17 @@ elements.voltageRanges.addEventListener("click", (event) => {
 
   voltageRangeMinutes = Number(button.dataset.rangeMinutes);
   setActiveVoltageRange();
+  refresh().catch(console.error);
+});
+
+elements.liveCameraButton.addEventListener("click", async () => {
+  if (!selectedBoatId) {
+    return;
+  }
+
+  const action = liveCameraActive ? "stop" : "start";
+  const status = await postJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/live/${action}`);
+  updateLiveButton(status.active);
   refresh().catch(console.error);
 });
 
@@ -69,6 +82,7 @@ async function refresh() {
   const historyLimit = VOLTAGE_RANGES[voltageRangeMinutes]?.historyLimit || 420;
   const history = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/history?limit=${historyLimit}`);
   const snapshot = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/snapshot/latest`);
+  const liveStatus = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/live`);
   const records = Object.values(latest.devices);
   const newest = records.sort((a, b) => new Date(b.received_at) - new Date(a.received_at))[0];
 
@@ -77,11 +91,20 @@ async function refresh() {
     return;
   }
 
+  updateLiveButton(liveStatus.active);
   renderDashboard(newest, records, snapshot.snapshot, history.heartbeats);
 }
 
 async function fetchJson(path) {
   const response = await fetch(path);
+  if (!response.ok) {
+    throw new Error(`${path} returned ${response.status}`);
+  }
+  return response.json();
+}
+
+async function postJson(path) {
+  const response = await fetch(path, { method: "POST" });
   if (!response.ok) {
     throw new Error(`${path} returned ${response.status}`);
   }
@@ -263,6 +286,12 @@ function renderSnapshot(snapshot) {
   elements.snapshotTime.textContent = formatDate(snapshot.received_at);
 }
 
+function updateLiveButton(active) {
+  liveCameraActive = active === true;
+  elements.liveCameraButton.classList.toggle("active", liveCameraActive);
+  elements.liveCameraButton.textContent = liveCameraActive ? "Stop Live" : "View Live";
+}
+
 function renderDevices(records) {
   elements.devices.replaceChildren(
     ...records.map((record) => {
@@ -348,4 +377,12 @@ function formatDuration(seconds) {
 
 refresh().catch(console.error);
 setActiveVoltageRange();
-setInterval(() => refresh().catch(console.error), 15000);
+scheduleRefresh();
+
+function scheduleRefresh() {
+  setTimeout(() => {
+    refresh()
+      .catch(console.error)
+      .finally(scheduleRefresh);
+  }, liveCameraActive ? 2500 : 15000);
+}
