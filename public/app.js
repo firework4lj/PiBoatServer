@@ -47,6 +47,8 @@ let marker;
 let selectedBoatId;
 let voltageRangeMinutes = 180;
 let liveCameraActive = false;
+let dashboardRefreshTimer;
+let liveSnapshotTimer;
 
 elements.voltageRanges.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-range-minutes]");
@@ -67,7 +69,7 @@ elements.liveCameraButton.addEventListener("click", async () => {
   const action = liveCameraActive ? "stop" : "start";
   const status = await postJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/live/${action}`);
   updateLiveButton(status.active);
-  refresh().catch(console.error);
+  await refreshSnapshotOnly();
 });
 
 async function refresh() {
@@ -290,6 +292,7 @@ function updateLiveButton(active) {
   liveCameraActive = active === true;
   elements.liveCameraButton.classList.toggle("active", liveCameraActive);
   elements.liveCameraButton.textContent = liveCameraActive ? "Stop Live" : "View Live";
+  scheduleLiveSnapshotRefresh();
 }
 
 function renderDevices(records) {
@@ -377,12 +380,34 @@ function formatDuration(seconds) {
 
 refresh().catch(console.error);
 setActiveVoltageRange();
-scheduleRefresh();
+scheduleDashboardRefresh();
 
-function scheduleRefresh() {
-  setTimeout(() => {
+function scheduleDashboardRefresh() {
+  clearTimeout(dashboardRefreshTimer);
+  dashboardRefreshTimer = setTimeout(() => {
     refresh()
       .catch(console.error)
-      .finally(scheduleRefresh);
-  }, liveCameraActive ? 2500 : 15000);
+      .finally(scheduleDashboardRefresh);
+  }, 15000);
+}
+
+function scheduleLiveSnapshotRefresh() {
+  clearTimeout(liveSnapshotTimer);
+  if (!liveCameraActive) {
+    return;
+  }
+
+  liveSnapshotTimer = setTimeout(() => {
+    refreshSnapshotOnly()
+      .catch(console.error)
+      .finally(scheduleLiveSnapshotRefresh);
+  }, 2500);
+}
+
+async function refreshSnapshotOnly() {
+  if (!selectedBoatId) {
+    return;
+  }
+  const snapshot = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/snapshot/latest`);
+  renderSnapshot(snapshot.snapshot);
 }
