@@ -27,6 +27,9 @@ const VOLTAGE_RANGES = {
   1440: { label: "1d", historyLimit: 3000 },
 };
 
+const ESTIMATED_BATTERY_CAPACITY_AMP_HOURS = 100;
+const MIN_DISCHARGE_WINDOW_MS = 2 * 60 * 1000;
+
 const map = L.map("map", { zoomControl: true }).setView([45.58809, -122.7044], 14);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19,
@@ -127,10 +130,10 @@ function renderDashboard(record, records, snapshot, history) {
   elements.speed.textContent = formatKnots(gnss.speed_knots);
   elements.cellular.textContent = [sim7600.operator?.name, sim7600.network?.system_mode].filter(Boolean).join(" - ") || "--";
   elements.signal.textContent = formatSignal(sim7600.signal?.rssi_dbm);
-  elements.battery.textContent = formatBattery(battery);
   elements.uptime.textContent = formatDuration(system.uptime_seconds);
   renderDevices(records);
-  renderVoltageChart(history);
+  const dischargeWatts = renderVoltageChart(history);
+  elements.battery.textContent = formatBattery(battery, dischargeWatts);
   renderSnapshot(snapshot);
 
   if (position) {
@@ -144,8 +147,7 @@ function renderDashboard(record, records, snapshot, history) {
 }
 
 function renderVoltageChart(history) {
-  const rangeStart = Date.now() - (voltageRangeMinutes * 60 * 1000);
-  const points = history
+  const allPoints = history
     .map((record) => {
       const battery = record.sensors?.arduino_voltage;
       if (!Number.isFinite(battery?.voltage)) {
@@ -158,8 +160,10 @@ function renderVoltageChart(history) {
       };
     })
     .filter(Boolean)
-    .filter((point) => point.timestamp >= rangeStart)
     .sort((a, b) => a.timestamp - b.timestamp);
+  const newestTimestamp = allPoints.at(-1)?.timestamp || Date.now();
+  const rangeStart = newestTimestamp - (voltageRangeMinutes * 60 * 1000);
+  const points = allPoints.filter((point) => point.timestamp >= rangeStart && point.timestamp <= newestTimestamp);
 
   const canvas = elements.voltageChart;
   const ctx = canvas.getContext("2d");
@@ -169,10 +173,12 @@ function renderVoltageChart(history) {
   canvas.height = Math.max(1, Math.floor(bounds.height * scale));
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
 
-  drawVoltageChart(ctx, bounds.width, bounds.height, points);
+  const dischargeWatts = estimateDischargeWatts(points);
+  drawVoltageChart(ctx, bounds.width, bounds.height, points, rangeStart, newestTimestamp, dischargeWatts);
+  return dischargeWatts;
 }
 
-function drawVoltageChart(ctx, width, height, points) {
+function drawVoltageChart(ctx, width, height, points, rangeStart, rangeEnd, dischargeWatts) {
   ctx.clearRect(0, 0, width, height);
   const padding = { top: 16, right: 14, bottom: 28, left: 42 };
   const chartWidth = width - padding.left - padding.right;
@@ -193,19 +199,19 @@ function drawVoltageChart(ctx, width, height, points) {
   const maxVoltage = Math.max(...voltages);
   const yMin = Math.max(0, Math.floor((minVoltage - 0.2) * 10) / 10);
   const yMax = Math.ceil((maxVoltage + 0.2) * 10) / 10;
-  const firstTime = points[0].timestamp;
   const lastTime = points[points.length - 1].timestamp;
   const current = points[points.length - 1];
   const delta = current.voltage - points[0].voltage;
   const deltaLabel = `${delta >= 0 ? "+" : ""}${delta.toFixed(2)} V`;
+  const drawLabel = Number.isFinite(dischargeWatts) ? ` - est ${dischargeWatts.toFixed(0)} W draw` : "";
 
-  elements.voltageSummary.textContent = `${current.voltage.toFixed(2)} V now (${deltaLabel})`;
+  elements.voltageSummary.textContent = `${current.voltage.toFixed(2)} V at ${formatChartTime(lastTime)} (${deltaLabel})${drawLabel}`;
 
   drawGrid(ctx, padding, chartWidth, chartHeight, yMin, yMax);
 
   ctx.beginPath();
   points.forEach((point, index) => {
-    const x = padding.left + ((point.timestamp - firstTime) / Math.max(1, lastTime - firstTime)) * chartWidth;
+    const x = padding.left + ((point.timestamp - rangeStart) / Math.max(1, rangeEnd - rangeStart)) * chartWidth;
     const y = padding.top + (1 - ((point.voltage - yMin) / Math.max(0.1, yMax - yMin))) * chartHeight;
     if (index === 0) {
       ctx.moveTo(x, y);
@@ -219,7 +225,7 @@ function drawVoltageChart(ctx, width, height, points) {
 
   ctx.fillStyle = "#117b4f";
   points.filter((point) => point.charging).forEach((point) => {
-    const x = padding.left + ((point.timestamp - firstTime) / Math.max(1, lastTime - firstTime)) * chartWidth;
+    const x = padding.left + ((point.timestamp - rangeStart) / Math.max(1, rangeEnd - rangeStart)) * chartWidth;
     const y = padding.top + (1 - ((point.voltage - yMin) / Math.max(0.1, yMax - yMin))) * chartHeight;
     ctx.beginPath();
     ctx.arc(x, y, 3, 0, Math.PI * 2);
@@ -228,8 +234,69 @@ function drawVoltageChart(ctx, width, height, points) {
 
   drawChartText(ctx, `${yMax.toFixed(1)}V`, 8, padding.top + 4, "#65717a", "left");
   drawChartText(ctx, `${yMin.toFixed(1)}V`, 8, padding.top + chartHeight, "#65717a", "left");
-  drawChartText(ctx, formatChartTime(firstTime), padding.left, height - 8, "#65717a", "left");
-  drawChartText(ctx, formatChartTime(lastTime), width - padding.right, height - 8, "#65717a", "right");
+  drawChartText(ctx, formatChartTime(rangeStart), padding.left, height - 8, "#65717a", "left");
+  drawChartText(ctx, formatChartTime(rangeEnd), width - padding.right, height - 8, "#65717a", "right");
+}
+
+function estimateDischargeWatts(points) {
+  if (points.length < 2 || points.at(-1).charging) {
+    return null;
+  }
+
+  const lastChargingIndex = points.findLastIndex((point) => point.charging);
+  const dischargePoints = points.slice(lastChargingIndex + 1);
+  if (dischargePoints.length < 2) {
+    return null;
+  }
+
+  const first = dischargePoints[0];
+  const current = dischargePoints.at(-1);
+  const elapsedMs = current.timestamp - first.timestamp;
+  if (elapsedMs < MIN_DISCHARGE_WINDOW_MS) {
+    return null;
+  }
+
+  const startSoc = estimateLeadAcidSocPercent(first.voltage);
+  const endSoc = estimateLeadAcidSocPercent(current.voltage);
+  const socDrop = startSoc - endSoc;
+  if (socDrop <= 0) {
+    return 0;
+  }
+
+  const averageVoltage = (first.voltage + current.voltage) / 2;
+  const wattHours = (socDrop / 100) * ESTIMATED_BATTERY_CAPACITY_AMP_HOURS * averageVoltage;
+  const elapsedHours = elapsedMs / (60 * 60 * 1000);
+  return wattHours / elapsedHours;
+}
+
+function estimateLeadAcidSocPercent(voltage) {
+  const curve = [
+    [11.31, 10],
+    [11.58, 20],
+    [11.75, 30],
+    [11.90, 40],
+    [12.06, 50],
+    [12.20, 60],
+    [12.32, 70],
+    [12.42, 80],
+    [12.50, 90],
+    [12.70, 100],
+  ];
+
+  if (voltage <= curve[0][0]) {
+    return 0;
+  }
+
+  for (let index = 1; index < curve.length; index += 1) {
+    const [upperVoltage, upperSoc] = curve[index];
+    const [lowerVoltage, lowerSoc] = curve[index - 1];
+    if (voltage <= upperVoltage) {
+      const ratio = (voltage - lowerVoltage) / (upperVoltage - lowerVoltage);
+      return lowerSoc + ratio * (upperSoc - lowerSoc);
+    }
+  }
+
+  return 100;
 }
 
 function setActiveVoltageRange() {
@@ -352,7 +419,7 @@ function formatSignal(value) {
   return `${value} dBm - ${label}`;
 }
 
-function formatBattery(battery) {
+function formatBattery(battery, dischargeWatts) {
   if (!Number.isFinite(battery.voltage)) {
     return "--";
   }
@@ -362,6 +429,8 @@ function formatBattery(battery) {
   }
   if (battery.charging) {
     parts.push("charging");
+  } else if (Number.isFinite(dischargeWatts)) {
+    parts.push(`est draw ${dischargeWatts.toFixed(0)} W`);
   }
   return parts.join(" - ");
 }
