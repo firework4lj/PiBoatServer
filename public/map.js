@@ -10,6 +10,8 @@ const elements = {
   averageSpeed: document.querySelector("#trackAverageSpeed"),
   maxSpeed: document.querySelector("#trackMaxSpeed"),
   movingTime: document.querySelector("#trackMovingTime"),
+  startTime: document.querySelector("#trackStartTime"),
+  endTime: document.querySelector("#trackEndTime"),
   list: document.querySelector("#trackList"),
 };
 
@@ -129,7 +131,7 @@ function renderTrackList() {
       color.className = "track-color";
       color.style.background = track.color;
       name.textContent = track.label;
-      summary.textContent = `${formatDistance(track.stats.distanceMeters)} - ${formatDurationMs(track.stats.movingTimeMs)} moving`;
+      summary.textContent = `${formatTrackTime(track.stats.startTimestamp)} - ${formatTrackTime(track.stats.endTimestamp)}`;
       actions.className = "track-row-actions";
       checkbox.type = "checkbox";
       checkbox.checked = track.visible;
@@ -341,8 +343,10 @@ function calculateTrackStats(points) {
 
   return {
     distanceMeters: distanceMetersTotal,
+    endTimestamp: points.at(-1)?.timestamp ?? null,
     elapsedMs,
     movingTimeMs,
+    startTimestamp: points[0]?.timestamp ?? null,
     averageMovingSpeedKnots,
     maxSpeedKnots,
   };
@@ -351,8 +355,10 @@ function calculateTrackStats(points) {
 function emptyStats() {
   return {
     distanceMeters: null,
+    endTimestamp: null,
     elapsedMs: null,
     movingTimeMs: null,
+    startTimestamp: null,
     averageMovingSpeedKnots: null,
     maxSpeedKnots: null,
   };
@@ -363,6 +369,8 @@ function renderTrackStats(stats) {
   elements.averageSpeed.textContent = formatSpeed(stats.averageMovingSpeedKnots);
   elements.maxSpeed.textContent = formatSpeed(stats.maxSpeedKnots);
   elements.movingTime.textContent = formatDurationMs(stats.movingTimeMs);
+  elements.startTime.textContent = formatTrackTime(stats.startTimestamp);
+  elements.endTime.textContent = formatTrackTime(stats.endTimestamp);
 }
 
 function visibleTrackBounds() {
@@ -446,6 +454,17 @@ function formatDate(value) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(value);
+}
+
+function formatTrackTime(timestamp) {
+  if (!Number.isFinite(timestamp)) {
+    return "--";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
 }
 
 function formatDistance(value) {
