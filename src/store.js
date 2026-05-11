@@ -73,6 +73,55 @@ export class HeartbeatStore {
     return records.reverse();
   }
 
+  async deleteHistoryRangeForBoat(boatId, start, end) {
+    const startMs = new Date(start).getTime();
+    const endMs = new Date(end).getTime();
+    if (!boatId || !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+      throw new Error("invalid history deletion range");
+    }
+
+    let lines;
+    try {
+      lines = (await readFile(this.historyPath, "utf8")).split("\n");
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        return { deleted: 0 };
+      }
+      throw error;
+    }
+
+    let deleted = 0;
+    const keptRecords = [];
+    const keptLines = [];
+
+    for (const line of lines) {
+      if (!line.trim()) {
+        continue;
+      }
+
+      const record = JSON.parse(line);
+      const timestamp = new Date(record.received_at || record.sent_at).getTime();
+      const shouldDelete = record.boat_id === boatId &&
+        Number.isFinite(timestamp) &&
+        timestamp >= startMs &&
+        timestamp < endMs;
+
+      if (shouldDelete) {
+        deleted += 1;
+      } else {
+        keptRecords.push(record);
+        keptLines.push(JSON.stringify(record));
+      }
+    }
+
+    const tmpHistoryPath = `${this.historyPath}.tmp`;
+    await writeFile(tmpHistoryPath, keptLines.length ? `${keptLines.join("\n")}\n` : "");
+    await rename(tmpHistoryPath, this.historyPath);
+    await this.#writeLatest(this.#latestFromRecords(keptRecords));
+
+    return { deleted };
+  }
+
   async saveSnapshot({ boatId, deviceId, sentAt, receivedAt, image }) {
     const directory = path.join(this.snapshotDir, safePathPart(boatId), safePathPart(deviceId));
     await mkdir(directory, { recursive: true });
@@ -149,6 +198,15 @@ export class HeartbeatStore {
     const tmpPath = `${this.latestPath}.tmp`;
     await writeFile(tmpPath, `${JSON.stringify(latest, null, 2)}\n`);
     await rename(tmpPath, this.latestPath);
+  }
+
+  #latestFromRecords(records) {
+    const latest = {};
+    for (const record of records) {
+      latest[record.boat_id] ||= {};
+      latest[record.boat_id][record.device_id] = record;
+    }
+    return latest;
   }
 }
 

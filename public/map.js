@@ -1,6 +1,7 @@
 const TRACK_HISTORY_LIMIT = 25000;
 const TRACK_MIN_DISTANCE_METERS = 25;
 const TRACK_MAX_POINTS = 1200;
+const TRACK_COLORS = ["#0f5f78", "#117b4f", "#a15c00", "#6b5bd6", "#b42318", "#1665a7"];
 
 const elements = {
   boatName: document.querySelector("#trackBoatName"),
@@ -9,6 +10,7 @@ const elements = {
   averageSpeed: document.querySelector("#trackAverageSpeed"),
   maxSpeed: document.querySelector("#trackMaxSpeed"),
   movingTime: document.querySelector("#trackMovingTime"),
+  list: document.querySelector("#trackList"),
 };
 
 const map = L.map("trackMap", { zoomControl: true }).setView([45.58809, -122.7044], 13);
@@ -26,6 +28,11 @@ const boatIcon = L.divIcon({
   iconAnchor: [17, 17],
 });
 
+let boatId;
+let latestMarker;
+let tracks = [];
+let selectedTrackId;
+
 loadTrackMap().catch((error) => {
   console.error(error);
   elements.meta.textContent = "Unable to load track history";
@@ -33,7 +40,7 @@ loadTrackMap().catch((error) => {
 
 async function loadTrackMap() {
   const boats = await fetchJson("/api/boats");
-  const boatId = boats.boats[0]?.boat_id;
+  boatId = boats.boats[0]?.boat_id;
   if (!boatId) {
     elements.boatName.textContent = "No boats";
     elements.meta.textContent = "Waiting for telemetry";
@@ -49,42 +56,211 @@ async function loadTrackMap() {
     .map(trackPointFromRecord)
     .filter(Boolean)
     .sort((a, b) => a.timestamp - b.timestamp);
-  const trackPoints = reduceTrackPoints(rawPoints);
-  const stats = calculateTrackStats(trackPoints);
 
-  renderTrack(trackPoints, newest);
-  elements.meta.textContent = formatTrackMeta(rawPoints, trackPoints);
-  renderTrackStats(stats);
+  tracks = buildDailyTracks(rawPoints);
+  selectedTrackId = tracks[0]?.id;
+
+  renderLatestMarker(newest);
+  renderTrackLayers();
+  renderTrackList();
+  selectTrack(selectedTrackId);
+  elements.meta.textContent = formatTrackMeta(rawPoints, tracks);
 }
 
-async function fetchJson(path) {
-  const response = await fetch(path);
+async function fetchJson(path, options) {
+  const response = await fetch(path, options);
   if (!response.ok) {
     throw new Error(`${path} returned ${response.status}`);
   }
   return response.json();
 }
 
-function renderTrack(trackPoints, latestRecord) {
+function renderLatestMarker(latestRecord) {
   const latestPosition = getPosition(latestRecord);
-  if (latestPosition) {
-    L.marker([latestPosition.latitude, latestPosition.longitude], { icon: boatIcon }).addTo(map);
-  }
-
-  if (trackPoints.length > 1) {
-    const latLngs = trackPoints.map((point) => [point.latitude, point.longitude]);
-    const track = L.polyline(latLngs, {
-      color: "#0f5f78",
-      opacity: 0.85,
-      weight: 3,
-    }).addTo(map);
-    map.fitBounds(track.getBounds(), { maxZoom: 15, padding: [28, 28] });
+  if (!latestPosition) {
     return;
   }
 
-  if (latestPosition) {
-    map.setView([latestPosition.latitude, latestPosition.longitude], 15);
+  latestMarker = L.marker([latestPosition.latitude, latestPosition.longitude], { icon: boatIcon }).addTo(map);
+}
+
+function renderTrackLayers() {
+  tracks.forEach((track) => {
+    const latLngs = track.points.map((point) => [point.latitude, point.longitude]);
+    if (latLngs.length < 2) {
+      return;
+    }
+
+    track.layer = L.polyline(latLngs, {
+      color: track.color,
+      opacity: 0.85,
+      weight: 3,
+    }).addTo(map);
+
+    track.layer.on("click", () => selectTrack(track.id));
+  });
+
+  const bounds = visibleTrackBounds();
+  if (bounds) {
+    map.fitBounds(bounds, { maxZoom: 15, padding: [28, 28] });
+  } else if (latestMarker) {
+    map.setView(latestMarker.getLatLng(), 15);
   }
+}
+
+function renderTrackList() {
+  elements.list.replaceChildren(
+    ...tracks.map((track) => {
+      const row = document.createElement("div");
+      const header = document.createElement("div");
+      const title = document.createElement("div");
+      const color = document.createElement("span");
+      const name = document.createElement("strong");
+      const summary = document.createElement("small");
+      const actions = document.createElement("div");
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      const deleteButton = document.createElement("button");
+
+      row.className = "track-row";
+      row.dataset.trackId = track.id;
+      header.className = "track-row-header";
+      title.className = "track-row-title";
+      color.className = "track-color";
+      color.style.background = track.color;
+      name.textContent = track.label;
+      summary.textContent = `${formatDistance(track.stats.distanceMeters)} - ${formatDurationMs(track.stats.movingTimeMs)} moving`;
+      actions.className = "track-row-actions";
+      checkbox.type = "checkbox";
+      checkbox.checked = track.visible;
+      label.append(checkbox, " Visible");
+      deleteButton.type = "button";
+      deleteButton.textContent = "Delete";
+
+      title.append(color, name);
+      header.append(title, summary);
+      actions.append(label, deleteButton);
+      row.append(header, actions);
+
+      row.addEventListener("click", () => selectTrack(track.id));
+      checkbox.addEventListener("click", (event) => event.stopPropagation());
+      checkbox.addEventListener("change", () => setTrackVisible(track.id, checkbox.checked));
+      deleteButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteTrack(track.id).catch((error) => {
+          console.error(error);
+          elements.meta.textContent = "Unable to delete track";
+        });
+      });
+
+      return row;
+    }),
+  );
+}
+
+function selectTrack(trackId) {
+  const track = tracks.find((item) => item.id === trackId) || tracks[0];
+  if (!track) {
+    renderTrackStats(emptyStats());
+    return;
+  }
+
+  selectedTrackId = track.id;
+  renderTrackStats(track.stats);
+  elements.list.querySelectorAll(".track-row").forEach((row) => {
+    row.classList.toggle("active", row.dataset.trackId === track.id);
+  });
+
+  if (track.layer) {
+    map.fitBounds(track.layer.getBounds(), { maxZoom: 15, padding: [28, 28] });
+  }
+}
+
+function setTrackVisible(trackId, visible) {
+  const track = tracks.find((item) => item.id === trackId);
+  if (!track) {
+    return;
+  }
+
+  track.visible = visible;
+  if (track.layer) {
+    if (visible) {
+      track.layer.addTo(map);
+    } else {
+      track.layer.remove();
+    }
+  }
+}
+
+async function deleteTrack(trackId) {
+  const track = tracks.find((item) => item.id === trackId);
+  if (!track || !boatId) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Delete track data for ${track.label}?`);
+  if (!confirmed) {
+    return;
+  }
+
+  let token = sessionStorage.getItem("piboat_api_token") || "";
+  if (!token) {
+    token = window.prompt("API token required to delete track data") || "";
+    if (token) {
+      sessionStorage.setItem("piboat_api_token", token);
+    }
+  }
+  if (!token) {
+    return;
+  }
+
+  await fetchJson(
+    `/api/boats/${encodeURIComponent(boatId)}/history?start=${encodeURIComponent(track.startIso)}&end=${encodeURIComponent(track.endIso)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+
+  if (track.layer) {
+    track.layer.remove();
+  }
+  tracks = tracks.filter((item) => item.id !== track.id);
+  selectedTrackId = tracks[0]?.id;
+  renderTrackList();
+  selectTrack(selectedTrackId);
+  elements.meta.textContent = `Deleted ${track.label}`;
+}
+
+function buildDailyTracks(rawPoints) {
+  const groups = new Map();
+  rawPoints.forEach((point) => {
+    const key = localDayKey(point.timestamp);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(point);
+  });
+
+  return [...groups.entries()]
+    .sort(([left], [right]) => right.localeCompare(left))
+    .map(([key, points], index) => {
+      const reducedPoints = reduceTrackPoints(points);
+      const [year, month, day] = key.split("-").map(Number);
+      const start = new Date(year, month - 1, day);
+      const end = new Date(year, month - 1, day + 1);
+      return {
+        id: key,
+        label: formatDayLabel(start),
+        color: TRACK_COLORS[index % TRACK_COLORS.length],
+        points: reducedPoints,
+        rawPointCount: points.length,
+        visible: true,
+        startIso: start.toISOString(),
+        endIso: end.toISOString(),
+        stats: calculateTrackStats(reducedPoints),
+      };
+    });
 }
 
 function trackPointFromRecord(record) {
@@ -172,11 +348,30 @@ function calculateTrackStats(points) {
   };
 }
 
+function emptyStats() {
+  return {
+    distanceMeters: null,
+    elapsedMs: null,
+    movingTimeMs: null,
+    averageMovingSpeedKnots: null,
+    maxSpeedKnots: null,
+  };
+}
+
 function renderTrackStats(stats) {
   elements.distance.textContent = formatDistance(stats.distanceMeters);
-  elements.averageSpeed.textContent = formatKnots(stats.averageMovingSpeedKnots);
-  elements.maxSpeed.textContent = formatKnots(stats.maxSpeedKnots);
+  elements.averageSpeed.textContent = formatSpeed(stats.averageMovingSpeedKnots);
+  elements.maxSpeed.textContent = formatSpeed(stats.maxSpeedKnots);
   elements.movingTime.textContent = formatDurationMs(stats.movingTimeMs);
+}
+
+function visibleTrackBounds() {
+  const visibleLayers = tracks.filter((track) => track.visible && track.layer).map((track) => track.layer);
+  if (!visibleLayers.length) {
+    return null;
+  }
+
+  return visibleLayers.reduce((bounds, layer) => bounds.extend(layer.getBounds()), visibleLayers[0].getBounds());
 }
 
 function getPosition(record) {
@@ -212,18 +407,38 @@ function metersToNauticalMiles(value) {
   return value / 1852;
 }
 
+function metersToMiles(value) {
+  return value / 1609.344;
+}
+
 function metersPerSecondToKnots(value) {
   return value * 1.943844;
 }
 
-function formatTrackMeta(rawPoints, trackPoints) {
+function formatTrackMeta(rawPoints, dailyTracks) {
   if (!rawPoints.length) {
     return "No location history yet";
   }
 
   const first = new Date(rawPoints[0].timestamp);
   const last = new Date(rawPoints.at(-1).timestamp);
-  return `${trackPoints.length} track points from ${formatDate(first)} to ${formatDate(last)}`;
+  return `${dailyTracks.length} daily tracks from ${formatDate(first)} to ${formatDate(last)}`;
+}
+
+function localDayKey(timestamp) {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDayLabel(value) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(value);
 }
 
 function formatDate(value) {
@@ -239,14 +454,22 @@ function formatDistance(value) {
   }
 
   const nauticalMiles = metersToNauticalMiles(value);
+  const miles = metersToMiles(value);
   if (nauticalMiles >= 0.1) {
-    return `${nauticalMiles.toFixed(2)} nm`;
+    return `${nauticalMiles.toFixed(2)} nm / ${miles.toFixed(2)} mi`;
   }
-  return `${Math.round(value)} m`;
+  return `${Math.round(value)} m / ${miles.toFixed(2)} mi`;
 }
 
-function formatKnots(value) {
-  return Number.isFinite(value) ? `${value.toFixed(1)} kt` : "--";
+function formatSpeed(value) {
+  if (!Number.isFinite(value)) {
+    return "--";
+  }
+  return `${value.toFixed(1)} kt / ${knotsToMph(value).toFixed(1)} mph`;
+}
+
+function knotsToMph(value) {
+  return value * 1.150779;
 }
 
 function formatDurationMs(value) {

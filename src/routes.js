@@ -66,6 +66,10 @@ export function createRouter({ config, store }) {
         sendJson(res, 200, { boat_id: boatId, heartbeats: await store.historyForBoat(boatId, limit) });
         return;
       }
+      if (req.method === "DELETE" && historyMatch) {
+        await handleDeleteHistory(req, res, { config, store, url, boatId: decodeURIComponent(historyMatch[1]) });
+        return;
+      }
 
       const snapshotLatestMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/snapshot\/latest$/);
       if (req.method === "GET" && snapshotLatestMatch) {
@@ -103,6 +107,25 @@ export function createRouter({ config, store }) {
       sendJson(res, 500, { error: "internal server error" });
     }
   };
+}
+
+async function handleDeleteHistory(req, res, { config, store, url, boatId }) {
+  if (!requireBearerToken(req, config.apiToken)) {
+    sendJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+
+  const start = url.searchParams.get("start");
+  const end = url.searchParams.get("end");
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!start || !end || Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
+    sendJson(res, 400, { error: "start and end ISO timestamps are required" });
+    return;
+  }
+
+  const result = await store.deleteHistoryRangeForBoat(boatId, start, end);
+  sendJson(res, 200, { status: "deleted", boat_id: boatId, ...result });
 }
 
 async function handleSnapshot(req, res, { config, store }) {
