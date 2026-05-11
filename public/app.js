@@ -12,6 +12,10 @@ const elements = {
   voltageChart: document.querySelector("#voltageChart"),
   voltageSummary: document.querySelector("#voltageSummary"),
   voltageRanges: document.querySelector("#voltageRanges"),
+  batteryState: document.querySelector("#batteryState"),
+  batteryTrend: document.querySelector("#batteryTrend"),
+  batteryChargeTime: document.querySelector("#batteryChargeTime"),
+  batteryBestCharge: document.querySelector("#batteryBestCharge"),
   snapshot: document.querySelector("#snapshot"),
   snapshotTime: document.querySelector("#snapshotTime"),
   liveCameraButton: document.querySelector("#liveCameraButton"),
@@ -34,6 +38,8 @@ const MIN_DISCHARGE_WINDOW_MS = 10 * 60 * 1000;
 const MIN_VOLTAGE_GAP_MS = 2 * 60 * 1000;
 const MIN_WATT_BUCKET_MS = 2 * 60 * 1000;
 const MAX_WATT_BUCKET_MS = 30 * 60 * 1000;
+const TRACK_MIN_DISTANCE_METERS = 25;
+const TRACK_MAX_POINTS = 300;
 
 const map = L.map("map", { zoomControl: true }).setView([45.58809, -122.7044], 14);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -52,6 +58,7 @@ const boatIcon = L.divIcon({
 });
 
 let marker;
+let trackLine;
 let selectedBoatId;
 let voltageRangeMinutes = 180;
 let liveCameraActive = false;
@@ -137,8 +144,9 @@ function renderDashboard(record, records, snapshot, history) {
   elements.signal.textContent = formatSignal(sim7600.signal?.rssi_dbm);
   elements.uptime.textContent = formatDuration(system.uptime_seconds);
   renderDevices(records);
-  const dischargeWatts = renderVoltageChart(history);
-  elements.battery.textContent = formatBattery(battery, dischargeWatts);
+  const batteryInsights = renderVoltageChart(history);
+  renderBatteryInsights(batteryInsights);
+  elements.battery.textContent = formatBattery(battery, batteryInsights.dischargeWatts);
   renderSnapshot(snapshot);
 
   if (position) {
@@ -149,6 +157,85 @@ function renderDashboard(record, records, snapshot, history) {
       marker.setLatLng([position.latitude, position.longitude]);
     }
   }
+
+  renderTrack(history);
+}
+
+function renderTrack(history) {
+  const points = reduceTrackPoints(
+    history
+      .map((record) => {
+        const position = getPosition(record);
+        if (!position) {
+          return null;
+        }
+        return {
+          ...position,
+          timestamp: new Date(record.received_at || record.sent_at).getTime(),
+          speedKnots: record.sensors?.sim7600?.gnss?.speed_knots,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.timestamp - b.timestamp),
+  );
+
+  const latLngs = points.map((point) => [point.latitude, point.longitude]);
+  if (!trackLine) {
+    trackLine = L.polyline(latLngs, {
+      color: "#0f5f78",
+      opacity: 0.8,
+      weight: 3,
+    }).addTo(map);
+  } else {
+    trackLine.setLatLngs(latLngs);
+  }
+
+  if (latLngs.length > 1) {
+    map.fitBounds(trackLine.getBounds(), { maxZoom: 15, padding: [24, 24] });
+  }
+}
+
+function reduceTrackPoints(points) {
+  if (points.length <= 2) {
+    return points;
+  }
+
+  const reduced = [points[0]];
+  points.slice(1, -1).forEach((point) => {
+    const previous = reduced.at(-1);
+    const movedMeters = distanceMeters(previous, point);
+    const underway = Number.isFinite(point.speedKnots) && point.speedKnots >= 1;
+    if (movedMeters >= TRACK_MIN_DISTANCE_METERS || underway) {
+      reduced.push(point);
+    }
+  });
+
+  const last = points.at(-1);
+  if (distanceMeters(reduced.at(-1), last) > 0) {
+    reduced.push(last);
+  }
+
+  if (reduced.length <= TRACK_MAX_POINTS) {
+    return reduced;
+  }
+
+  const stride = Math.ceil(reduced.length / TRACK_MAX_POINTS);
+  return reduced.filter((_, index) => index === 0 || index === reduced.length - 1 || index % stride === 0);
+}
+
+function distanceMeters(a, b) {
+  const earthRadiusMeters = 6371000;
+  const lat1 = degreesToRadians(a.latitude);
+  const lat2 = degreesToRadians(b.latitude);
+  const deltaLat = degreesToRadians(b.latitude - a.latitude);
+  const deltaLon = degreesToRadians(b.longitude - a.longitude);
+  const haversine = Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
+  return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function degreesToRadians(value) {
+  return value * (Math.PI / 180);
 }
 
 function renderVoltageChart(history) {
@@ -180,9 +267,10 @@ function renderVoltageChart(history) {
   canvas.height = Math.max(1, Math.floor(bounds.height * scale));
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
 
-  const dischargeWatts = estimateDischargeWatts(points);
+  const batteryInsights = deriveBatteryInsights(samples, points);
+  const dischargeWatts = batteryInsights.dischargeWatts;
   drawVoltageChart(ctx, bounds.width, bounds.height, points, rangeStart, newestTimestamp, dischargeWatts);
-  return dischargeWatts;
+  return batteryInsights;
 }
 
 function voltagePointsWithGaps(samples) {
@@ -289,6 +377,140 @@ function drawVoltageChart(ctx, width, height, points, rangeStart, rangeEnd, disc
   drawChartText(ctx, `${yMin.toFixed(1)}V`, 8, padding.top + chartHeight, "#65717a", "left");
   drawChartText(ctx, formatChartAxisTime(rangeStart), padding.left, height - 8, "#65717a", "left");
   drawChartText(ctx, formatChartAxisTime(rangeEnd), width - padding.right, height - 8, "#65717a", "right");
+}
+
+function deriveBatteryInsights(samples, points) {
+  const current = points.at(-1) || null;
+  return {
+    currentState: classifyBatteryState(current),
+    voltageTrendPerHour: estimateVoltageTrendPerHour(points),
+    chargeTimeMs: estimateChargeTimeMs(samples),
+    bestChargeSession: bestChargeSession(points),
+    dischargeWatts: estimateDischargeWatts(points),
+  };
+}
+
+function classifyBatteryState(point) {
+  if (!point) {
+    return "No voltage data";
+  }
+
+  if (point.charging) {
+    if (point.voltage >= 14.2) {
+      return "Charging - bulk";
+    }
+    if (point.voltage >= 13.5) {
+      return "Charging - absorb/float";
+    }
+    return "Charging";
+  }
+
+  if (point.voltage >= 12.7) {
+    return "Resting - full";
+  }
+  if (point.voltage >= 12.2) {
+    return "Discharging";
+  }
+  return "Low";
+}
+
+function estimateVoltageTrendPerHour(points) {
+  if (points.length < 2) {
+    return null;
+  }
+
+  const continuousSegment = latestContinuousSegment(points);
+  const trendPoints = continuousSegment.length >= 2 ? continuousSegment : points;
+  const elapsedMs = trendPoints.at(-1).timestamp - trendPoints[0].timestamp;
+  if (elapsedMs < MIN_DISCHARGE_WINDOW_MS) {
+    return null;
+  }
+
+  const smoothedPoints = smoothDischargePoints(trendPoints);
+  if (smoothedPoints.length < 2) {
+    return null;
+  }
+
+  return linearRegressionSlopePerHour(smoothedPoints, "voltage");
+}
+
+function latestContinuousSegment(points) {
+  let segment = [];
+  points.forEach((point) => {
+    if (point.gapBefore) {
+      segment = [];
+    }
+    segment.push(point);
+  });
+  return segment;
+}
+
+function estimateChargeTimeMs(samples) {
+  let totalMs = 0;
+  const gapThreshold = voltageGapThreshold(samples);
+
+  for (let index = 1; index < samples.length; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    const interval = current.timestamp - previous.timestamp;
+    if (
+      interval > 0 &&
+      interval <= gapThreshold &&
+      previous.charging &&
+      current.charging &&
+      Number.isFinite(previous.voltage) &&
+      Number.isFinite(current.voltage)
+    ) {
+      totalMs += interval;
+    }
+  }
+
+  return totalMs;
+}
+
+function bestChargeSession(points) {
+  let best = null;
+  let currentSession = [];
+
+  const flush = () => {
+    if (currentSession.length < 2) {
+      currentSession = [];
+      return;
+    }
+
+    const first = currentSession[0];
+    const last = currentSession.at(-1);
+    const durationMs = last.timestamp - first.timestamp;
+    const voltageGain = last.voltage - first.voltage;
+    if (durationMs >= MIN_DISCHARGE_WINDOW_MS && voltageGain > 0) {
+      const session = { start: first.timestamp, end: last.timestamp, durationMs, voltageGain };
+      if (!best || session.voltageGain > best.voltageGain) {
+        best = session;
+      }
+    }
+
+    currentSession = [];
+  };
+
+  points.forEach((point) => {
+    if (point.gapBefore || !point.charging) {
+      flush();
+    }
+
+    if (point.charging) {
+      currentSession.push(point);
+    }
+  });
+  flush();
+
+  return best;
+}
+
+function renderBatteryInsights(insights) {
+  elements.batteryState.textContent = insights.currentState;
+  elements.batteryTrend.textContent = formatVoltageTrend(insights.voltageTrendPerHour);
+  elements.batteryChargeTime.textContent = formatDurationMs(insights.chargeTimeMs);
+  elements.batteryBestCharge.textContent = formatChargeSession(insights.bestChargeSession);
 }
 
 function estimateDischargeWatts(points) {
@@ -567,6 +789,38 @@ function formatBattery(battery, dischargeWatts) {
     parts.push(`est draw ${dischargeWatts.toFixed(0)} W`);
   }
   return parts.join(" - ");
+}
+
+function formatVoltageTrend(value) {
+  if (!Number.isFinite(value)) {
+    return "--";
+  }
+  if (Math.abs(value) < 0.01) {
+    return "flat";
+  }
+  const direction = value > 0 ? "rising" : "falling";
+  return `${direction} ${Math.abs(value).toFixed(2)} V/hr`;
+}
+
+function formatDurationMs(milliseconds) {
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) {
+    return "--";
+  }
+
+  const minutes = Math.round(milliseconds / 60000);
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (hours > 0) {
+    return `${hours}h ${remainder}m`;
+  }
+  return `${minutes}m`;
+}
+
+function formatChargeSession(session) {
+  if (!session) {
+    return "--";
+  }
+  return `+${session.voltageGain.toFixed(2)} V over ${formatDurationMs(session.durationMs)}`;
 }
 
 function formatDuration(seconds) {
