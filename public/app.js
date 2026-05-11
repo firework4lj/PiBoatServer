@@ -40,6 +40,7 @@ const MIN_WATT_BUCKET_MS = 2 * 60 * 1000;
 const MAX_WATT_BUCKET_MS = 30 * 60 * 1000;
 const TRACK_MIN_DISTANCE_METERS = 25;
 const TRACK_MAX_POINTS = 300;
+const MAX_CHART_POINTS = 1200;
 
 const map = L.map("map", { zoomControl: true }).setView([45.58809, -122.7044], 14);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -172,10 +173,10 @@ function renderTrack(history) {
         return {
           ...position,
           timestamp: new Date(record.received_at || record.sent_at).getTime(),
-          speedKnots: record.sensors?.sim7600?.gnss?.speed_knots,
+          speedKnots: record.sensors?.sim7600?.gnss?.speed_knots ?? record.sensors?.gps?.speed_knots,
         };
       })
-      .filter(Boolean)
+      .filter((point) => point && Number.isFinite(point.timestamp))
       .sort((a, b) => a.timestamp - b.timestamp),
   );
 
@@ -249,7 +250,7 @@ function renderVoltageChart(history) {
       return {
         timestamp,
         voltage: Number.isFinite(battery?.voltage) ? battery.voltage : null,
-        charging: battery.charging === true,
+        charging: battery?.charging === true,
       };
     })
     .filter(Boolean)
@@ -271,6 +272,21 @@ function renderVoltageChart(history) {
   const dischargeWatts = batteryInsights.dischargeWatts;
   drawVoltageChart(ctx, bounds.width, bounds.height, points, rangeStart, newestTimestamp, dischargeWatts);
   return batteryInsights;
+}
+
+function downsampleChartPoints(points) {
+  if (points.length <= MAX_CHART_POINTS) {
+    return points;
+  }
+
+  const stride = Math.ceil(points.length / MAX_CHART_POINTS);
+  return points.filter((point, index) => (
+    index === 0 ||
+    index === points.length - 1 ||
+    point.gapBefore ||
+    points[index + 1]?.gapBefore ||
+    index % stride === 0
+  ));
 }
 
 function voltagePointsWithGaps(samples) {
@@ -345,13 +361,14 @@ function drawVoltageChart(ctx, width, height, points, rangeStart, rangeEnd, disc
   const delta = current.voltage - points[0].voltage;
   const deltaLabel = `${delta >= 0 ? "+" : ""}${delta.toFixed(2)} V`;
   const drawLabel = Number.isFinite(dischargeWatts) ? ` - est ${dischargeWatts.toFixed(0)} W draw` : "";
+  const drawPoints = downsampleChartPoints(points);
 
   elements.voltageSummary.textContent = `${current.voltage.toFixed(2)} V at ${formatChartTime(lastTime, { includeDate: true })} (${deltaLabel})${drawLabel}`;
 
   drawGrid(ctx, padding, chartWidth, chartHeight, yMin, yMax);
 
   ctx.beginPath();
-  points.forEach((point, index) => {
+  drawPoints.forEach((point, index) => {
     const x = padding.left + ((point.timestamp - rangeStart) / Math.max(1, rangeEnd - rangeStart)) * chartWidth;
     const y = padding.top + (1 - ((point.voltage - yMin) / Math.max(0.1, yMax - yMin))) * chartHeight;
     if (index === 0 || point.gapBefore) {
@@ -365,7 +382,7 @@ function drawVoltageChart(ctx, width, height, points, rangeStart, rangeEnd, disc
   ctx.stroke();
 
   ctx.fillStyle = "#117b4f";
-  points.filter((point) => point.charging).forEach((point) => {
+  drawPoints.filter((point) => point.charging).forEach((point) => {
     const x = padding.left + ((point.timestamp - rangeStart) / Math.max(1, rangeEnd - rangeStart)) * chartWidth;
     const y = padding.top + (1 - ((point.voltage - yMin) / Math.max(0.1, yMax - yMin))) * chartHeight;
     ctx.beginPath();
@@ -749,6 +766,10 @@ function getPosition(record) {
   const gnss = record.sensors?.sim7600?.gnss;
   if (gnss?.fix && Number.isFinite(gnss.latitude) && Number.isFinite(gnss.longitude)) {
     return { latitude: gnss.latitude, longitude: gnss.longitude };
+  }
+  const gps = record.sensors?.gps;
+  if (Number.isFinite(gps?.latitude) && Number.isFinite(gps?.longitude)) {
+    return { latitude: gps.latitude, longitude: gps.longitude };
   }
   return null;
 }
