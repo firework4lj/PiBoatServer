@@ -3,6 +3,8 @@ import { createReadStream } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 
+const MAX_HISTORY_RECORDS = 25000;
+
 export class HeartbeatStore {
   constructor(dataDir) {
     this.dataDir = dataDir;
@@ -42,7 +44,7 @@ export class HeartbeatStore {
   }
 
   async historyForBoat(boatId, limit = 100) {
-    const boundedLimit = Math.max(1, Math.min(Number(limit) || 100, 1000));
+    const boundedLimit = Math.max(1, Math.min(Number(limit) || 100, MAX_HISTORY_RECORDS));
     const records = [];
 
     try {
