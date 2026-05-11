@@ -10,6 +10,7 @@ const elements = {
   uptime: document.querySelector("#uptime"),
   devices: document.querySelector("#devices"),
   voltageChart: document.querySelector("#voltageChart"),
+  voltageTooltip: document.querySelector("#voltageTooltip"),
   voltageSummary: document.querySelector("#voltageSummary"),
   voltageRanges: document.querySelector("#voltageRanges"),
   batteryState: document.querySelector("#batteryState"),
@@ -62,6 +63,7 @@ let voltageRangeMinutes = 180;
 let liveCameraActive = false;
 let dashboardRefreshTimer;
 let liveSnapshotTimer;
+let voltageChartState = null;
 
 elements.voltageRanges.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-range-minutes]");
@@ -84,6 +86,11 @@ elements.liveCameraButton.addEventListener("click", async () => {
   updateLiveButton(status.active);
   await refreshSnapshotOnly();
 });
+
+elements.voltageChart.addEventListener("pointermove", showVoltageTooltip);
+elements.voltageChart.addEventListener("pointerdown", showVoltageTooltip);
+elements.voltageChart.addEventListener("pointerleave", hideVoltageTooltip);
+elements.voltageChart.addEventListener("pointercancel", hideVoltageTooltip);
 
 async function refresh() {
   const boats = await fetchJson("/api/boats");
@@ -259,6 +266,8 @@ function drawVoltageChart(ctx, width, height, points, rangeStart, rangeEnd, disc
   const padding = { top: 16, right: 14, bottom: 28, left: 42 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
+  voltageChartState = null;
+  hideVoltageTooltip();
 
   ctx.fillStyle = "#fbfcfc";
   ctx.fillRect(0, 0, width, height);
@@ -281,6 +290,18 @@ function drawVoltageChart(ctx, width, height, points, rangeStart, rangeEnd, disc
   const deltaLabel = `${delta >= 0 ? "+" : ""}${delta.toFixed(2)} V`;
   const drawLabel = Number.isFinite(dischargeWatts) ? ` - est ${dischargeWatts.toFixed(0)} W draw` : "";
   const drawPoints = downsampleChartPoints(points);
+  voltageChartState = {
+    chartHeight,
+    chartWidth,
+    height,
+    padding,
+    points,
+    rangeEnd,
+    rangeStart,
+    width,
+    yMax,
+    yMin,
+  };
 
   elements.voltageSummary.textContent = `${current.voltage.toFixed(2)} V at ${formatChartTime(lastTime, { includeDate: true })} (${deltaLabel})${drawLabel}`;
 
@@ -313,6 +334,52 @@ function drawVoltageChart(ctx, width, height, points, rangeStart, rangeEnd, disc
   drawChartText(ctx, `${yMin.toFixed(1)}V`, 8, padding.top + chartHeight, "#65717a", "left");
   drawChartText(ctx, formatChartAxisTime(rangeStart), padding.left, height - 8, "#65717a", "left");
   drawChartText(ctx, formatChartAxisTime(rangeEnd), width - padding.right, height - 8, "#65717a", "right");
+}
+
+function showVoltageTooltip(event) {
+  if (!voltageChartState) {
+    hideVoltageTooltip();
+    return;
+  }
+
+  event.preventDefault();
+  const rect = elements.voltageChart.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const targetTimestamp = voltageChartState.rangeStart +
+    ((x - voltageChartState.padding.left) / Math.max(1, voltageChartState.chartWidth)) *
+    (voltageChartState.rangeEnd - voltageChartState.rangeStart);
+  const nearest = nearestVoltagePoint(targetTimestamp, voltageChartState.points);
+  if (!nearest) {
+    hideVoltageTooltip();
+    return;
+  }
+
+  const markerX = voltageChartState.padding.left +
+    ((nearest.timestamp - voltageChartState.rangeStart) / Math.max(1, voltageChartState.rangeEnd - voltageChartState.rangeStart)) *
+    voltageChartState.chartWidth;
+  const markerY = voltageChartState.padding.top +
+    (1 - ((nearest.voltage - voltageChartState.yMin) / Math.max(0.1, voltageChartState.yMax - voltageChartState.yMin))) *
+    voltageChartState.chartHeight;
+  const left = Math.min(Math.max(markerX, 70), voltageChartState.width - 70);
+  const top = Math.max(36, markerY - 8);
+
+  elements.voltageTooltip.hidden = false;
+  elements.voltageTooltip.style.left = `${left}px`;
+  elements.voltageTooltip.style.top = `${top}px`;
+  elements.voltageTooltip.innerHTML = `${nearest.voltage.toFixed(2)} V<br>${formatTooltipTime(nearest.timestamp)}`;
+}
+
+function hideVoltageTooltip() {
+  elements.voltageTooltip.hidden = true;
+}
+
+function nearestVoltagePoint(timestamp, points) {
+  return points.reduce((nearest, point) => {
+    if (!nearest) {
+      return point;
+    }
+    return Math.abs(point.timestamp - timestamp) < Math.abs(nearest.timestamp - timestamp) ? point : nearest;
+  }, null);
 }
 
 function deriveBatteryInsights(samples, points) {
@@ -633,6 +700,16 @@ function formatChartTime(timestamp, { includeDate = false } = {}) {
     options.day = "numeric";
   }
   return new Intl.DateTimeFormat(undefined, options).format(new Date(timestamp));
+}
+
+function formatTooltipTime(timestamp) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(timestamp));
 }
 
 function renderSnapshot(snapshot) {

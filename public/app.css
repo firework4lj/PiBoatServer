@@ -344,12 +344,44 @@ dd {
   color: #0f5f78;
 }
 
+.chart-wrap {
+  position: relative;
+}
+
 #voltageChart {
   background: #fbfcfc;
   border: 1px solid var(--line);
   border-radius: 8px;
   height: 180px;
+  touch-action: none;
   width: 100%;
+}
+
+.chart-tooltip {
+  background: rgba(23, 32, 38, 0.92);
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.35;
+  min-width: 132px;
+  padding: 7px 9px;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(-50%, -110%);
+  white-space: nowrap;
+  z-index: 10;
+}
+
+.chart-tooltip::after {
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid rgba(23, 32, 38, 0.92);
+  bottom: -6px;
+  content: "";
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
 }
 
 .battery-insights {

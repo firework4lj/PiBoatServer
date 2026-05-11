@@ -78,7 +78,10 @@
             <button type="button" data-range-minutes="4320">3d</button>
             <button type="button" data-range-minutes="10080">7d</button>
           </div>
-          <canvas id="voltageChart" width="672" height="260"></canvas>
+          <div class="chart-wrap">
+            <canvas id="voltageChart" width="672" height="260"></canvas>
+            <div id="voltageTooltip" class="chart-tooltip" hidden></div>
+          </div>
           <div class="battery-insights" id="batteryInsights" aria-label="Battery insights">
             <div>
               <span>State</span>
