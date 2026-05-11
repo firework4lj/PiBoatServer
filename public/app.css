@@ -146,11 +146,27 @@ body {
   min-height: 320px;
   order: 2;
   overflow: hidden;
+  position: relative;
 }
 
 #map {
   height: 360px;
   width: 100%;
+}
+
+.map-link {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #0f5f78;
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 7px 10px;
+  position: absolute;
+  right: 10px;
+  text-decoration: none;
+  top: 10px;
+  z-index: 900;
 }
 
 .panel {
@@ -418,5 +434,83 @@ dd {
 @media (max-width: 820px) {
   .shell {
     padding: 10px;
+  }
+}
+
+.map-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+}
+
+.map-toolbar {
+  align-items: center;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 620px) auto;
+  gap: 14px;
+  padding: 12px 16px;
+}
+
+.map-toolbar h1 {
+  font-size: 1.05rem;
+}
+
+.map-toolbar a {
+  color: #0f5f78;
+  font-size: 0.86rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.map-meta {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.track-stats {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.track-stats div {
+  background: #fbfcfc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.track-stats span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 800;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.track-stats strong {
+  display: block;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+#trackMap {
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+}
+
+@media (max-width: 980px) {
+  .map-toolbar {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .track-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

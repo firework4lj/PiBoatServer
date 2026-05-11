@@ -38,8 +38,6 @@ const MIN_DISCHARGE_WINDOW_MS = 10 * 60 * 1000;
 const MIN_VOLTAGE_GAP_MS = 2 * 60 * 1000;
 const MIN_WATT_BUCKET_MS = 2 * 60 * 1000;
 const MAX_WATT_BUCKET_MS = 30 * 60 * 1000;
-const TRACK_MIN_DISTANCE_METERS = 25;
-const TRACK_MAX_POINTS = 300;
 const MAX_CHART_POINTS = 1200;
 
 const map = L.map("map", { zoomControl: true }).setView([45.58809, -122.7044], 14);
@@ -59,7 +57,6 @@ const boatIcon = L.divIcon({
 });
 
 let marker;
-let trackLine;
 let selectedBoatId;
 let voltageRangeMinutes = 180;
 let liveCameraActive = false;
@@ -159,84 +156,6 @@ function renderDashboard(record, records, snapshot, history) {
     }
   }
 
-  renderTrack(history);
-}
-
-function renderTrack(history) {
-  const points = reduceTrackPoints(
-    history
-      .map((record) => {
-        const position = getPosition(record);
-        if (!position) {
-          return null;
-        }
-        return {
-          ...position,
-          timestamp: new Date(record.received_at || record.sent_at).getTime(),
-          speedKnots: record.sensors?.sim7600?.gnss?.speed_knots ?? record.sensors?.gps?.speed_knots,
-        };
-      })
-      .filter((point) => point && Number.isFinite(point.timestamp))
-      .sort((a, b) => a.timestamp - b.timestamp),
-  );
-
-  const latLngs = points.map((point) => [point.latitude, point.longitude]);
-  if (!trackLine) {
-    trackLine = L.polyline(latLngs, {
-      color: "#0f5f78",
-      opacity: 0.8,
-      weight: 3,
-    }).addTo(map);
-  } else {
-    trackLine.setLatLngs(latLngs);
-  }
-
-  if (latLngs.length > 1) {
-    map.fitBounds(trackLine.getBounds(), { maxZoom: 15, padding: [24, 24] });
-  }
-}
-
-function reduceTrackPoints(points) {
-  if (points.length <= 2) {
-    return points;
-  }
-
-  const reduced = [points[0]];
-  points.slice(1, -1).forEach((point) => {
-    const previous = reduced.at(-1);
-    const movedMeters = distanceMeters(previous, point);
-    const underway = Number.isFinite(point.speedKnots) && point.speedKnots >= 1;
-    if (movedMeters >= TRACK_MIN_DISTANCE_METERS || underway) {
-      reduced.push(point);
-    }
-  });
-
-  const last = points.at(-1);
-  if (distanceMeters(reduced.at(-1), last) > 0) {
-    reduced.push(last);
-  }
-
-  if (reduced.length <= TRACK_MAX_POINTS) {
-    return reduced;
-  }
-
-  const stride = Math.ceil(reduced.length / TRACK_MAX_POINTS);
-  return reduced.filter((_, index) => index === 0 || index === reduced.length - 1 || index % stride === 0);
-}
-
-function distanceMeters(a, b) {
-  const earthRadiusMeters = 6371000;
-  const lat1 = degreesToRadians(a.latitude);
-  const lat2 = degreesToRadians(b.latitude);
-  const deltaLat = degreesToRadians(b.latitude - a.latitude);
-  const deltaLon = degreesToRadians(b.longitude - a.longitude);
-  const haversine = Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
-  return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
-}
-
-function degreesToRadians(value) {
-  return value * (Math.PI / 180);
 }
 
 function renderVoltageChart(history) {

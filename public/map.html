@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PiBoatServer Track Map</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    >
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <main class="map-page">
+      <header class="map-toolbar">
+        <div>
+          <h1 id="trackBoatName">Track Map</h1>
+          <div class="map-meta" id="trackMeta">Loading track history...</div>
+        </div>
+        <div class="track-stats" aria-label="Track statistics">
+          <div>
+            <span>Distance</span>
+            <strong id="trackDistance">--</strong>
+          </div>
+          <div>
+            <span>Avg Speed</span>
+            <strong id="trackAverageSpeed">--</strong>
+          </div>
+          <div>
+            <span>Max Speed</span>
+            <strong id="trackMaxSpeed">--</strong>
+          </div>
+          <div>
+            <span>Moving</span>
+            <strong id="trackMovingTime">--</strong>
+          </div>
+        </div>
+        <a href="/">Dashboard</a>
+      </header>
+      <div id="trackMap" aria-label="Boat track map"></div>
+    </main>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script type="module" src="/map.js"></script>
+  </body>
+</html>
