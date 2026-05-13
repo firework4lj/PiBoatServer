@@ -1,5 +1,7 @@
 const TRACK_HISTORY_LIMIT = 25000;
 const TRACK_MIN_DISTANCE_METERS = 25;
+const TRACK_START_DISTANCE_METERS = 30.48;
+const TRACK_START_SPEED_KNOTS = 1;
 const TRACK_MAX_POINTS = 1200;
 const TRACK_COLORS = ["#0f5f78", "#117b4f", "#a15c00", "#6b5bd6", "#b42318", "#1665a7"];
 
@@ -247,7 +249,8 @@ function buildDailyTracks(rawPoints) {
   return [...groups.entries()]
     .sort(([left], [right]) => right.localeCompare(left))
     .map(([key, points], index) => {
-      const reducedPoints = reduceTrackPoints(points);
+      const movementPoints = trimStationaryTrackStart(points);
+      const reducedPoints = reduceTrackPoints(movementPoints);
       const [year, month, day] = key.split("-").map(Number);
       const start = new Date(year, month - 1, day);
       const end = new Date(year, month - 1, day + 1);
@@ -262,7 +265,40 @@ function buildDailyTracks(rawPoints) {
         endIso: end.toISOString(),
         stats: calculateTrackStats(reducedPoints),
       };
-    });
+    })
+    .filter((track) => track.points.length >= 2 && track.stats.distanceMeters >= TRACK_START_DISTANCE_METERS);
+}
+
+function trimStationaryTrackStart(points) {
+  if (points.length < 2) {
+    return [];
+  }
+
+  let anchor = points[0];
+  let startIndex = -1;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const point = points[index];
+    const movedMeters = distanceMeters(anchor, point);
+    const underway = Number.isFinite(point.speedKnots) && point.speedKnots >= TRACK_START_SPEED_KNOTS;
+
+    if (movedMeters >= TRACK_START_DISTANCE_METERS || underway) {
+      startIndex = Math.max(0, index - 1);
+      break;
+    }
+
+    anchor = averagePosition(anchor, point);
+  }
+
+  return startIndex === -1 ? [] : points.slice(startIndex);
+}
+
+function averagePosition(a, b) {
+  return {
+    ...b,
+    latitude: (a.latitude + b.latitude) / 2,
+    longitude: (a.longitude + b.longitude) / 2,
+  };
 }
 
 function trackPointFromRecord(record) {
