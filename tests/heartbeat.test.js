@@ -73,6 +73,22 @@ test("normalizeHeartbeat expands compact telemetry payloads", () => {
   assert.equal(heartbeat.sensors.arduino_voltage.soc_estimate_percent, 100);
 });
 
+test("normalizeHeartbeat expands compact audio telemetry fields", () => {
+  const heartbeat = normalizeHeartbeat(
+    {
+      t: "1,lukas-glasply,pi-bridge-1,6,2026-05-03T04:42:57Z,ok,ok,150.8,ok,0,-85,1,Dark Star,LTE,1,45.5880914,-122.7043979,0,,22.8,ok,12.7,0,100,ok,heavy_activity,-22.9,-6.4,17,16.5",
+    },
+    new Date("2026-05-03T04:43:00Z"),
+  );
+
+  assert.equal(heartbeat.sensors.audio_activity.status, "ok");
+  assert.equal(heartbeat.sensors.audio_activity.state, "heavy_activity");
+  assert.equal(heartbeat.sensors.audio_activity.rms_db, -22.9);
+  assert.equal(heartbeat.sensors.audio_activity.peak_db, -6.4);
+  assert.equal(heartbeat.sensors.audio_activity.impact_count_1m, 17);
+  assert.equal(heartbeat.sensors.audio_activity.peak_over_rms_db, 16.5);
+});
+
 test("parseCsvLine handles quoted commas", () => {
   assert.deepEqual(parseCsvLine('1,"boat, one",pi'), ["1", "boat, one", "pi"]);
 });

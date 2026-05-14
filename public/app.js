@@ -6,6 +6,7 @@ const elements = {
   speed: document.querySelector("#speed"),
   cellular: document.querySelector("#cellular"),
   signal: document.querySelector("#signal"),
+  audioActivity: document.querySelector("#audioActivity"),
   battery: document.querySelector("#battery"),
   uptime: document.querySelector("#uptime"),
   devices: document.querySelector("#devices"),
@@ -138,6 +139,7 @@ function renderDashboard(record, records, snapshot, history) {
   const gnss = sim7600.gnss || {};
   const system = record.sensors?.system || {};
   const battery = record.sensors?.arduino_voltage || {};
+  const audioActivity = record.sensors?.audio_activity || {};
   const position = getPosition(record);
 
   elements.boatName.textContent = record.boat_id;
@@ -147,6 +149,7 @@ function renderDashboard(record, records, snapshot, history) {
   elements.speed.textContent = formatKnots(gnss.speed_knots);
   elements.cellular.textContent = [sim7600.operator?.name, sim7600.network?.system_mode].filter(Boolean).join(" - ") || "--";
   elements.signal.textContent = formatSignal(sim7600.signal?.rssi_dbm);
+  elements.audioActivity.textContent = formatAudioActivity(audioActivity);
   elements.uptime.textContent = formatDuration(system.uptime_seconds);
   renderDevices(records);
   const batteryInsights = renderVoltageChart(history);
@@ -792,6 +795,30 @@ function formatSignal(value) {
   return `${value} dBm - ${label}`;
 }
 
+function formatAudioActivity(audioActivity) {
+  if (!audioActivity || audioActivity.status === "unknown") {
+    return "--";
+  }
+
+  const parts = [];
+  if (audioActivity.state) {
+    parts.push(titleCase(String(audioActivity.state).replaceAll("_", " ")));
+  } else if (audioActivity.status) {
+    parts.push(titleCase(audioActivity.status));
+  }
+  if (Number.isFinite(audioActivity.impact_count_1m)) {
+    parts.push(`${audioActivity.impact_count_1m} impacts/min`);
+  }
+  if (Number.isFinite(audioActivity.rms_db)) {
+    parts.push(`${audioActivity.rms_db.toFixed(1)} dB avg`);
+  }
+  if (Number.isFinite(audioActivity.peak_db)) {
+    parts.push(`${audioActivity.peak_db.toFixed(1)} dB peak`);
+  }
+
+  return parts.join(" - ") || "--";
+}
+
 function formatBattery(battery, dischargeWatts) {
   if (!Number.isFinite(battery.voltage)) {
     return "--";
@@ -806,6 +833,10 @@ function formatBattery(battery, dischargeWatts) {
     parts.push(`est draw ${dischargeWatts.toFixed(0)} W`);
   }
   return parts.join(" - ");
+}
+
+function titleCase(value) {
+  return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function formatVoltageTrend(value) {

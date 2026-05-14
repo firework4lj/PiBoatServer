@@ -99,6 +99,12 @@ export function normalizeCompactHeartbeat(payload, receivedAt = new Date()) {
     voltage,
     charging,
     socEstimatePercent,
+    audioStatus,
+    audioState,
+    audioRmsDb,
+    audioPeakDb,
+    audioImpactCount,
+    audioPeakOverRmsDb,
   ] = fields;
 
   return {
@@ -143,6 +149,14 @@ export function normalizeCompactHeartbeat(payload, receivedAt = new Date()) {
         voltage: numberOrNull(voltage),
         charging: charging === "1",
         soc_estimate_percent: numberOrNull(socEstimatePercent),
+      },
+      audio_activity: {
+        status: audioStatus || "unknown",
+        state: audioState || null,
+        rms_db: numberOrNull(audioRmsDb),
+        peak_db: numberOrNull(audioPeakDb),
+        impact_count_1m: numberOrNull(audioImpactCount),
+        peak_over_rms_db: numberOrNull(audioPeakOverRmsDb),
       },
     },
     received_at: receivedAt.toISOString(),
