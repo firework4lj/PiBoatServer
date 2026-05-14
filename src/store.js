@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
@@ -11,11 +11,13 @@ export class HeartbeatStore {
     this.historyPath = path.join(dataDir, "heartbeats.jsonl");
     this.latestPath = path.join(dataDir, "latest.json");
     this.snapshotDir = path.join(dataDir, "snapshots");
+    this.audioDir = path.join(dataDir, "audio");
   }
 
   async init() {
     await mkdir(this.dataDir, { recursive: true });
     await mkdir(this.snapshotDir, { recursive: true });
+    await mkdir(this.audioDir, { recursive: true });
     await this.#loadLatest();
   }
 
@@ -182,6 +184,73 @@ export class HeartbeatStore {
     }
   }
 
+  async saveAudioEvent({ boatId, deviceId, sentAt, receivedAt, trigger, rmsDb, peakDb, peakOverRmsDb, durationSeconds, audio }) {
+    const directory = path.join(this.audioDir, safePathPart(boatId), safePathPart(deviceId));
+    await mkdir(directory, { recursive: true });
+
+    const timestamp = safePathPart(receivedAt.replaceAll(":", "-"));
+    const audioPath = path.join(directory, `${timestamp}.wav`);
+    const metadataPath = path.join(directory, `${timestamp}.json`);
+    const metadata = {
+      boat_id: boatId,
+      device_id: deviceId,
+      sent_at: sentAt,
+      received_at: receivedAt,
+      trigger,
+      rms_db: numberOrNull(rmsDb),
+      peak_db: numberOrNull(peakDb),
+      peak_over_rms_db: numberOrNull(peakOverRmsDb),
+      duration_seconds: numberOrNull(durationSeconds),
+      bytes: audio.length,
+      audio_url: `/api/boats/${encodeURIComponent(boatId)}/devices/${encodeURIComponent(deviceId)}/audio/${encodeURIComponent(timestamp)}.wav`,
+    };
+
+    await writeFile(audioPath, audio);
+    await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+    return metadata;
+  }
+
+  async recentAudioEventsForBoat(boatId, limit = 10) {
+    const latest = await this.#loadLatest();
+    const devices = Object.keys(latest[boatId] || {});
+    const events = [];
+
+    for (const deviceId of devices) {
+      const directory = path.join(this.audioDir, safePathPart(boatId), safePathPart(deviceId));
+      let files;
+      try {
+        files = await readdir(directory);
+      } catch (error) {
+        if (error.code === "ENOENT") {
+          continue;
+        }
+        throw error;
+      }
+
+      for (const file of files) {
+        if (!file.endsWith(".json")) {
+          continue;
+        }
+        events.push(JSON.parse(await readFile(path.join(directory, file), "utf8")));
+      }
+    }
+
+    events.sort((a, b) => new Date(b.received_at) - new Date(a.received_at));
+    return events.slice(0, Math.max(1, Math.min(Number(limit) || 10, 50)));
+  }
+
+  async audioEventFile(boatId, deviceId, eventId) {
+    const audioPath = path.join(this.audioDir, safePathPart(boatId), safePathPart(deviceId), `${safePathPart(eventId)}.wav`);
+    try {
+      return await readFile(audioPath);
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async #loadLatest() {
     try {
       const contents = await readFile(this.latestPath, "utf8");
@@ -212,4 +281,12 @@ export class HeartbeatStore {
 
 function safePathPart(value) {
   return String(value).replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function numberOrNull(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }

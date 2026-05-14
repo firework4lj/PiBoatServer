@@ -267,13 +267,15 @@ dd {
 
 .devices,
 .camera,
-.voltage-chart {
+.voltage-chart,
+.audio-events {
   display: grid;
   gap: 10px;
 }
 
 .camera,
-.voltage-chart {
+.voltage-chart,
+.audio-events {
   margin-top: 24px;
 }
 
@@ -353,6 +355,34 @@ dd {
 .camera-button:disabled {
   cursor: wait;
   opacity: 0.68;
+}
+
+.audio-event-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.audio-event-meta {
+  display: grid;
+  gap: 3px;
+}
+
+.audio-event-meta strong {
+  font-size: 0.88rem;
+}
+
+.audio-event-meta span,
+.empty-text {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.audio-event-row audio {
+  height: 34px;
+  width: 100%;
 }
 
 .chart-wrap {

@@ -75,6 +75,39 @@ test("deleteHistoryRangeForBoat removes one boat range and rebuilds latest", asy
   }
 });
 
+test("saveAudioEvent stores recent event metadata and wav bytes", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "piboatserver-store-"));
+  const store = new HeartbeatStore(dataDir);
+  await store.init();
+
+  try {
+    await store.save(testHeartbeat("boat", "pi", 1, "2026-05-10T10:00:00Z"));
+    const metadata = await store.saveAudioEvent({
+      boatId: "boat",
+      deviceId: "pi",
+      sentAt: "2026-05-10T10:00:01Z",
+      receivedAt: "2026-05-10T10:00:02Z",
+      trigger: "impact",
+      rmsDb: "-22.9",
+      peakDb: "-3.2",
+      peakOverRmsDb: "19.7",
+      durationSeconds: "10",
+      audio: Buffer.from("RIFF-test"),
+    });
+
+    const events = await store.recentAudioEventsForBoat("boat", 10);
+    const audio = await store.audioEventFile("boat", "pi", metadata.audio_url.match(/audio\/([^/]+)\.wav$/)[1]);
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].trigger, "impact");
+    assert.equal(events[0].rms_db, -22.9);
+    assert.equal(events[0].bytes, 9);
+    assert.deepEqual(audio, Buffer.from("RIFF-test"));
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
 function testHeartbeat(boatId, deviceId, sequence, timestamp) {
   return {
     boat_id: boatId,

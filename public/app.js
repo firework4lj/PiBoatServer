@@ -22,6 +22,8 @@ const elements = {
   snapshotTime: document.querySelector("#snapshotTime"),
   refreshSnapshotButton: document.querySelector("#refreshSnapshotButton"),
   liveCameraButton: document.querySelector("#liveCameraButton"),
+  audioEvents: document.querySelector("#audioEvents"),
+  audioEventsSummary: document.querySelector("#audioEventsSummary"),
 };
 
 const VOLTAGE_RANGES = {
@@ -123,6 +125,7 @@ async function refresh() {
   const historyLimit = VOLTAGE_RANGES[voltageRangeMinutes]?.historyLimit || 420;
   const history = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/history?limit=${historyLimit}`);
   const snapshot = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/snapshot/latest`);
+  const audioEvents = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/audio-events?limit=6`);
   const liveStatus = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/live`);
   const records = Object.values(latest.devices);
   const newest = records.sort((a, b) => new Date(b.received_at) - new Date(a.received_at))[0];
@@ -133,7 +136,7 @@ async function refresh() {
   }
 
   updateLiveButton(liveStatus.active);
-  renderDashboard(newest, records, snapshot.snapshot, history.heartbeats);
+  renderDashboard(newest, records, snapshot.snapshot, history.heartbeats, audioEvents.events);
 }
 
 async function fetchJson(path) {
@@ -152,7 +155,7 @@ async function postJson(path) {
   return response.json();
 }
 
-function renderDashboard(record, records, snapshot, history) {
+function renderDashboard(record, records, snapshot, history, audioEvents) {
   const sim7600 = record.sensors?.sim7600 || {};
   const gnss = sim7600.gnss || {};
   const system = record.sensors?.system || {};
@@ -174,6 +177,7 @@ function renderDashboard(record, records, snapshot, history) {
   renderBatteryInsights(batteryInsights);
   elements.battery.textContent = formatBattery(battery, batteryInsights.dischargeWatts);
   renderSnapshot(snapshot);
+  renderAudioEvents(audioEvents);
 
   if (position) {
     if (!marker) {
@@ -745,6 +749,43 @@ function renderSnapshot(snapshot) {
   elements.snapshotTime.textContent = formatDate(snapshot.received_at);
 }
 
+function renderAudioEvents(events = []) {
+  elements.audioEventsSummary.textContent = events.length ? `${events.length} recent` : "--";
+  if (!events.length) {
+    elements.audioEvents.replaceChildren(emptyText("No audio events"));
+    return;
+  }
+
+  elements.audioEvents.replaceChildren(
+    ...events.map((event) => {
+      const row = document.createElement("div");
+      const meta = document.createElement("div");
+      const title = document.createElement("strong");
+      const detail = document.createElement("span");
+      const audio = document.createElement("audio");
+
+      row.className = "audio-event-row";
+      meta.className = "audio-event-meta";
+      title.textContent = `${titleCase(String(event.trigger || "audio event").replaceAll("_", " "))} - ${formatDate(event.received_at)}`;
+      detail.textContent = formatAudioEventDetail(event);
+      audio.controls = true;
+      audio.preload = "none";
+      audio.src = event.audio_url;
+
+      meta.append(title, detail);
+      row.append(meta, audio);
+      return row;
+    }),
+  );
+}
+
+function emptyText(text) {
+  const element = document.createElement("span");
+  element.className = "empty-text";
+  element.textContent = text;
+  return element;
+}
+
 function updateLiveButton(active) {
   liveCameraActive = active === true;
   elements.liveCameraButton.classList.toggle("active", liveCameraActive);
@@ -834,6 +875,20 @@ function formatAudioActivity(audioActivity) {
     parts.push(`${audioActivity.peak_db.toFixed(1)} dB peak`);
   }
 
+  return parts.join(" - ") || "--";
+}
+
+function formatAudioEventDetail(event) {
+  const parts = [];
+  if (Number.isFinite(event.duration_seconds)) {
+    parts.push(`${event.duration_seconds.toFixed(1)} sec`);
+  }
+  if (Number.isFinite(event.rms_db)) {
+    parts.push(`${event.rms_db.toFixed(1)} dB avg`);
+  }
+  if (Number.isFinite(event.peak_db)) {
+    parts.push(`${event.peak_db.toFixed(1)} dB peak`);
+  }
   return parts.join(" - ") || "--";
 }
 

@@ -31,6 +31,11 @@ export function createRouter({ config, store }) {
         return;
       }
 
+      if (req.method === "POST" && url.pathname === "/api/audio-event") {
+        await handleAudioEvent(req, res, { config, store });
+        return;
+      }
+
       const liveStartMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/live\/start$/);
       if (req.method === "POST" && liveStartMatch) {
         const boatId = decodeURIComponent(liveStartMatch[1]);
@@ -83,6 +88,33 @@ export function createRouter({ config, store }) {
       if (req.method === "GET" && snapshotLatestMatch) {
         const boatId = decodeURIComponent(snapshotLatestMatch[1]);
         sendJson(res, 200, { boat_id: boatId, snapshot: await store.latestSnapshotForBoat(boatId) });
+        return;
+      }
+
+      const audioEventsMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/audio-events$/);
+      if (req.method === "GET" && audioEventsMatch) {
+        const boatId = decodeURIComponent(audioEventsMatch[1]);
+        const limit = url.searchParams.get("limit") || 10;
+        sendJson(res, 200, { boat_id: boatId, events: await store.recentAudioEventsForBoat(boatId, limit) });
+        return;
+      }
+
+      const audioFileMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/devices\/([^/]+)\/audio\/([^/]+)\.wav$/);
+      if (req.method === "GET" && audioFileMatch) {
+        const boatId = decodeURIComponent(audioFileMatch[1]);
+        const deviceId = decodeURIComponent(audioFileMatch[2]);
+        const eventId = decodeURIComponent(audioFileMatch[3]);
+        const audio = await store.audioEventFile(boatId, deviceId, eventId);
+        if (!audio) {
+          sendJson(res, 404, { error: "audio event not found" });
+          return;
+        }
+        res.writeHead(200, {
+          "Content-Type": "audio/wav",
+          "Content-Length": audio.length,
+          "Cache-Control": "no-cache",
+        });
+        res.end(audio);
         return;
       }
 
@@ -183,6 +215,61 @@ async function handleSnapshot(req, res, { config, store }) {
   );
 
   sendJson(res, 202, { status: "accepted", snapshot: metadata });
+}
+
+async function handleAudioEvent(req, res, { config, store }) {
+  if (!requireBearerToken(req, config.apiToken)) {
+    sendJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+
+  if (!req.headers["content-type"]?.startsWith("audio/wav")) {
+    sendJson(res, 415, { error: "audio event must be audio/wav" });
+    return;
+  }
+
+  const boatId = req.headers["x-boat-id"];
+  const deviceId = req.headers["x-device-id"];
+  const sentAt = req.headers["x-sent-at"];
+  const trigger = req.headers["x-trigger"] || "audio_event";
+  if (!boatId || !deviceId || !sentAt || Number.isNaN(Date.parse(sentAt))) {
+    sendJson(res, 400, { error: "audio event metadata headers are required" });
+    return;
+  }
+
+  let audio;
+  try {
+    audio = await readBody(req, { maxBodyBytes: config.maxAudioEventBytes });
+  } catch (error) {
+    sendJson(res, error.statusCode || 400, { error: error.message || "invalid audio event body" });
+    return;
+  }
+
+  const metadata = await store.saveAudioEvent({
+    boatId,
+    deviceId,
+    sentAt,
+    receivedAt: new Date().toISOString(),
+    trigger,
+    rmsDb: req.headers["x-rms-db"],
+    peakDb: req.headers["x-peak-db"],
+    peakOverRmsDb: req.headers["x-peak-over-rms-db"],
+    durationSeconds: req.headers["x-duration-seconds"],
+    audio,
+  });
+
+  console.log(
+    JSON.stringify({
+      event: "audio.received",
+      boat_id: boatId,
+      device_id: deviceId,
+      trigger,
+      bytes: audio.length,
+      received_at: metadata.received_at,
+    }),
+  );
+
+  sendJson(res, 202, { status: "accepted", audio_event: metadata });
 }
 
 async function handleHeartbeat(req, res, { config, store }) {
