@@ -20,6 +20,7 @@ const elements = {
   batteryBestCharge: document.querySelector("#batteryBestCharge"),
   snapshot: document.querySelector("#snapshot"),
   snapshotTime: document.querySelector("#snapshotTime"),
+  refreshSnapshotButton: document.querySelector("#refreshSnapshotButton"),
   liveCameraButton: document.querySelector("#liveCameraButton"),
 };
 
@@ -86,6 +87,23 @@ elements.liveCameraButton.addEventListener("click", async () => {
   const status = await postJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/live/${action}`);
   updateLiveButton(status.active);
   await refreshSnapshotOnly();
+});
+
+elements.refreshSnapshotButton.addEventListener("click", async () => {
+  if (!selectedBoatId) {
+    return;
+  }
+
+  elements.refreshSnapshotButton.disabled = true;
+  elements.refreshSnapshotButton.textContent = "Requested";
+  await postJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/snapshot/request`);
+  setTimeout(() => {
+    refreshSnapshotOnly().catch(console.error);
+  }, 5000);
+  setTimeout(() => {
+    elements.refreshSnapshotButton.disabled = false;
+    elements.refreshSnapshotButton.textContent = "Refresh Photo";
+  }, 15000);
 });
 
 elements.voltageChart.addEventListener("pointermove", showVoltageTooltip);

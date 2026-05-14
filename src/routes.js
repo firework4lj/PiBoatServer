@@ -3,6 +3,7 @@ import { normalizeHeartbeat, validateHeartbeat } from "./heartbeat.js";
 import { sendStatic } from "./static.js";
 
 const liveCameraSessions = new Map();
+const snapshotRequests = new Map();
 const LIVE_CAMERA_DURATION_MS = 5 * 60 * 1000;
 const LIVE_CAMERA_INTERVAL_SECONDS = 2;
 
@@ -42,6 +43,13 @@ export function createRouter({ config, store }) {
         const boatId = decodeURIComponent(liveStopMatch[1]);
         liveCameraSessions.delete(boatId);
         sendJson(res, 202, { active: false });
+        return;
+      }
+
+      const snapshotRequestMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/snapshot\/request$/);
+      if (req.method === "POST" && snapshotRequestMatch) {
+        const boatId = decodeURIComponent(snapshotRequestMatch[1]);
+        sendJson(res, 202, requestSnapshot(boatId));
         return;
       }
 
@@ -162,6 +170,7 @@ async function handleSnapshot(req, res, { config, store }) {
     receivedAt: new Date().toISOString(),
     image,
   });
+  snapshotRequests.delete(boatId);
 
   console.log(
     JSON.stringify({
@@ -199,6 +208,7 @@ async function handleHeartbeat(req, res, { config, store }) {
   const heartbeat = normalizeHeartbeat(payload);
   await store.save(heartbeat);
   const liveCamera = liveCameraStatus(heartbeat.boat_id);
+  const snapshotRequest = snapshotRequestStatus(heartbeat.boat_id);
 
   console.log(
     JSON.stringify({
@@ -219,8 +229,27 @@ async function handleHeartbeat(req, res, { config, store }) {
         interval_seconds: liveCamera.interval_seconds,
         until: liveCamera.until,
       },
+      camera_snapshot: snapshotRequest,
     },
   });
+}
+
+function requestSnapshot(boatId) {
+  const request = {
+    requested: true,
+    request_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    requested_at: new Date().toISOString(),
+  };
+  snapshotRequests.set(boatId, request);
+  return request;
+}
+
+function snapshotRequestStatus(boatId) {
+  return snapshotRequests.get(boatId) || {
+    requested: false,
+    request_id: null,
+    requested_at: null,
+  };
 }
 
 function startLiveCamera(boatId) {

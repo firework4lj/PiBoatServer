@@ -325,7 +325,13 @@ dd {
   width: 100%;
 }
 
-.live-button {
+.camera-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.camera-button {
   appearance: none;
   background: #0f5f78;
   border: 1px solid #0f5f78;
@@ -339,9 +345,14 @@ dd {
   padding: 0 12px;
 }
 
-.live-button.active {
+.camera-button.active {
   background: #ffffff;
   color: #0f5f78;
+}
+
+.camera-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
 }
 
 .chart-wrap {
