@@ -95,14 +95,27 @@ test("saveAudioEvent stores recent event metadata and wav bytes", async () => {
       audio: Buffer.from("RIFF-test"),
     });
 
+    await store.saveAudioEventSnapshot({
+      boatId: "boat",
+      deviceId: "pi",
+      eventId: metadata.event_id,
+      sentAt: "2026-05-10T10:00:03Z",
+      receivedAt: "2026-05-10T10:00:04Z",
+      image: Buffer.from("jpeg-test"),
+    });
+
     const events = await store.recentAudioEventsForBoat("boat", 10);
     const audio = await store.audioEventFile("boat", "pi", metadata.audio_url.match(/audio\/([^/]+)\.wav$/)[1]);
+    const image = await store.audioEventImage("boat", "pi", metadata.event_id);
 
     assert.equal(events.length, 1);
     assert.equal(events[0].trigger, "impact");
     assert.equal(events[0].rms_db, -22.9);
     assert.equal(events[0].bytes, 9);
+    assert.equal(events[0].image_bytes, 9);
+    assert(events[0].image_url.endsWith(".jpg"));
     assert.deepEqual(audio, Buffer.from("RIFF-test"));
+    assert.deepEqual(image, Buffer.from("jpeg-test"));
   } finally {
     await rm(dataDir, { recursive: true, force: true });
   }

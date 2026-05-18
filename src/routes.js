@@ -36,6 +36,11 @@ export function createRouter({ config, store }) {
         return;
       }
 
+      if (req.method === "POST" && url.pathname === "/api/audio-event-snapshot") {
+        await handleAudioEventSnapshot(req, res, { config, store });
+        return;
+      }
+
       const liveStartMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/live\/start$/);
       if (req.method === "POST" && liveStartMatch) {
         const boatId = decodeURIComponent(liveStartMatch[1]);
@@ -115,6 +120,25 @@ export function createRouter({ config, store }) {
           "Cache-Control": "no-cache",
         });
         res.end(audio);
+        return;
+      }
+
+      const audioImageMatch = url.pathname.match(/^\/api\/boats\/([^/]+)\/devices\/([^/]+)\/audio\/([^/]+)\.jpg$/);
+      if (req.method === "GET" && audioImageMatch) {
+        const boatId = decodeURIComponent(audioImageMatch[1]);
+        const deviceId = decodeURIComponent(audioImageMatch[2]);
+        const eventId = decodeURIComponent(audioImageMatch[3]);
+        const image = await store.audioEventImage(boatId, deviceId, eventId);
+        if (!image) {
+          sendJson(res, 404, { error: "audio event image not found" });
+          return;
+        }
+        res.writeHead(200, {
+          "Content-Type": "image/jpeg",
+          "Content-Length": image.length,
+          "Cache-Control": "no-cache",
+        });
+        res.end(image);
         return;
       }
 
@@ -266,6 +290,57 @@ async function handleAudioEvent(req, res, { config, store }) {
       trigger,
       bytes: audio.length,
       received_at: metadata.received_at,
+    }),
+  );
+
+  sendJson(res, 202, { status: "accepted", audio_event: metadata });
+}
+
+async function handleAudioEventSnapshot(req, res, { config, store }) {
+  if (!requireBearerToken(req, config.apiToken)) {
+    sendJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+
+  if (!req.headers["content-type"]?.startsWith("image/jpeg")) {
+    sendJson(res, 415, { error: "audio event snapshot must be image/jpeg" });
+    return;
+  }
+
+  const boatId = req.headers["x-boat-id"];
+  const deviceId = req.headers["x-device-id"];
+  const eventId = req.headers["x-event-id"];
+  const sentAt = req.headers["x-sent-at"];
+  if (!boatId || !deviceId || !eventId || !sentAt || Number.isNaN(Date.parse(sentAt))) {
+    sendJson(res, 400, { error: "audio event snapshot metadata headers are required" });
+    return;
+  }
+
+  let image;
+  try {
+    image = await readBody(req, { maxBodyBytes: config.maxSnapshotBytes });
+  } catch (error) {
+    sendJson(res, error.statusCode || 400, { error: error.message || "invalid audio event snapshot body" });
+    return;
+  }
+
+  const metadata = await store.saveAudioEventSnapshot({
+    boatId,
+    deviceId,
+    eventId,
+    sentAt,
+    receivedAt: new Date().toISOString(),
+    image,
+  });
+
+  console.log(
+    JSON.stringify({
+      event: "audio.snapshot.received",
+      boat_id: boatId,
+      device_id: deviceId,
+      event_id: eventId,
+      bytes: image.length,
+      received_at: metadata.image_received_at,
     }),
   );
 

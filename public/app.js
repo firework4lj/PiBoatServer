@@ -779,6 +779,7 @@ function renderAudioEvents(events = []) {
       const detail = document.createElement("span");
       const badge = document.createElement("span");
       const audio = document.createElement("audio");
+      const image = document.createElement("img");
       const eventId = audioEventId(event);
       const listened = listenedAudioEvents.has(eventId);
 
@@ -801,8 +802,18 @@ function renderAudioEvents(events = []) {
       audio.addEventListener("ended", renderPendingAudioEvents);
       audio.addEventListener("pause", renderPendingAudioEvents);
 
+      if (event.image_url) {
+        image.className = "audio-event-image";
+        image.alt = "Audio event camera snapshot";
+        image.loading = "lazy";
+        image.src = `${event.image_url}?t=${encodeURIComponent(event.image_received_at || event.received_at)}`;
+      }
+
       meta.append(title, detail, badge);
       row.append(meta, audio);
+      if (event.image_url) {
+        row.append(image);
+      }
       return row;
     }),
   );

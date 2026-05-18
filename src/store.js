@@ -192,6 +192,7 @@ export class HeartbeatStore {
     const audioPath = path.join(directory, `${timestamp}.wav`);
     const metadataPath = path.join(directory, `${timestamp}.json`);
     const metadata = {
+      event_id: timestamp,
       boat_id: boatId,
       device_id: deviceId,
       sent_at: sentAt,
@@ -203,9 +204,28 @@ export class HeartbeatStore {
       duration_seconds: numberOrNull(durationSeconds),
       bytes: audio.length,
       audio_url: `/api/boats/${encodeURIComponent(boatId)}/devices/${encodeURIComponent(deviceId)}/audio/${encodeURIComponent(timestamp)}.wav`,
+      image_url: null,
     };
 
     await writeFile(audioPath, audio);
+    await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+    return metadata;
+  }
+
+  async saveAudioEventSnapshot({ boatId, deviceId, eventId, sentAt, receivedAt, image }) {
+    const directory = path.join(this.audioDir, safePathPart(boatId), safePathPart(deviceId));
+    await mkdir(directory, { recursive: true });
+
+    const safeEventId = safePathPart(eventId);
+    const imagePath = path.join(directory, `${safeEventId}.jpg`);
+    const metadataPath = path.join(directory, `${safeEventId}.json`);
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    metadata.image_sent_at = sentAt;
+    metadata.image_received_at = receivedAt;
+    metadata.image_bytes = image.length;
+    metadata.image_url = `/api/boats/${encodeURIComponent(boatId)}/devices/${encodeURIComponent(deviceId)}/audio/${encodeURIComponent(safeEventId)}.jpg`;
+
+    await writeFile(imagePath, image);
     await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
     return metadata;
   }
@@ -243,6 +263,18 @@ export class HeartbeatStore {
     const audioPath = path.join(this.audioDir, safePathPart(boatId), safePathPart(deviceId), `${safePathPart(eventId)}.wav`);
     try {
       return await readFile(audioPath);
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async audioEventImage(boatId, deviceId, eventId) {
+    const imagePath = path.join(this.audioDir, safePathPart(boatId), safePathPart(deviceId), `${safePathPart(eventId)}.jpg`);
+    try {
+      return await readFile(imagePath);
     } catch (error) {
       if (error.code === "ENOENT") {
         return null;

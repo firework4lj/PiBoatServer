@@ -411,6 +411,14 @@ dd {
   width: 100%;
 }
 
+.audio-event-image {
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  object-fit: cover;
+  width: 100%;
+}
+
 .chart-wrap {
   position: relative;
 }
