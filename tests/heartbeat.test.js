@@ -68,6 +68,7 @@ test("normalizeHeartbeat expands compact telemetry payloads", () => {
   assert.equal(heartbeat.sensors.sim7600.registration.registered, true);
   assert.equal(heartbeat.sensors.sim7600.gnss.latitude, 45.5880914);
   assert.equal(heartbeat.sensors.sim7600.gnss.course_degrees, null);
+  assert.deepEqual(heartbeat.sensors.sim7600.track_points, []);
   assert.equal(heartbeat.sensors.arduino_voltage.voltage, 12.7);
   assert.equal(heartbeat.sensors.arduino_voltage.charging, false);
   assert.equal(heartbeat.sensors.arduino_voltage.soc_estimate_percent, 100);
@@ -87,6 +88,17 @@ test("normalizeHeartbeat expands compact audio telemetry fields", () => {
   assert.equal(heartbeat.sensors.audio_activity.peak_db, -6.4);
   assert.equal(heartbeat.sensors.audio_activity.impact_count_1m, 17);
   assert.equal(heartbeat.sensors.audio_activity.peak_over_rms_db, 16.5);
+});
+
+test("normalizeHeartbeat expands compact track point batches", () => {
+  const heartbeat = normalizeHeartbeat(
+    {
+      t: '1,lukas-glasply,pi-bridge-1,6,2026-05-03T04:42:57Z,ok,ok,150.8,ok,0,-85,1,Dark Star,LTE,1,45.5880914,-122.7043979,0,,22.8,ok,12.7,0,100,ok,calm,-50,-30,0,20,"[[""2026-05-03T04:42:30Z"",45.5,-122.7,2.4,180]]"',
+    },
+    new Date("2026-05-03T04:43:00Z"),
+  );
+
+  assert.deepEqual(heartbeat.sensors.sim7600.track_points, [["2026-05-03T04:42:30Z", 45.5, -122.7, 2.4, 180]]);
 });
 
 test("parseCsvLine handles quoted commas", () => {

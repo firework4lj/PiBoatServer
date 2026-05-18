@@ -2,6 +2,7 @@ const TRACK_HISTORY_LIMIT = 25000;
 const TRACK_MIN_DISTANCE_METERS = 25;
 const TRACK_START_DISTANCE_METERS = 30.48;
 const TRACK_START_SPEED_KNOTS = 1;
+const TRACK_IDLE_GAP_MS = 10 * 60 * 1000;
 const TRACK_MAX_POINTS = 1200;
 const TRACK_COLORS = ["#0f5f78", "#117b4f", "#a15c00", "#6b5bd6", "#b42318", "#1665a7"];
 
@@ -57,7 +58,7 @@ async function loadTrackMap() {
   const records = Object.values(latest.devices || {});
   const newest = records.sort((a, b) => new Date(b.received_at) - new Date(a.received_at))[0];
   const rawPoints = history.heartbeats
-    .map(trackPointFromRecord)
+    .flatMap(trackPointsFromRecord)
     .filter(Boolean)
     .sort((a, b) => a.timestamp - b.timestamp);
 
@@ -246,27 +247,61 @@ function buildDailyTracks(rawPoints) {
     groups.get(key).push(point);
   });
 
+  let colorIndex = 0;
   return [...groups.entries()]
     .sort(([left], [right]) => right.localeCompare(left))
-    .map(([key, points], index) => {
-      const movementPoints = trimStationaryTrackStart(points);
-      const reducedPoints = reduceTrackPoints(movementPoints);
-      const [year, month, day] = key.split("-").map(Number);
-      const start = new Date(year, month - 1, day);
-      const end = new Date(year, month - 1, day + 1);
-      return {
-        id: key,
-        label: formatDayLabel(start),
-        color: TRACK_COLORS[index % TRACK_COLORS.length],
-        points: reducedPoints,
-        rawPointCount: points.length,
-        visible: true,
-        startIso: start.toISOString(),
-        endIso: end.toISOString(),
-        stats: calculateTrackStats(reducedPoints),
-      };
+    .flatMap(([key, points]) => {
+      const [year, month, dayNumber] = key.split("-").map(Number);
+      const dayDate = new Date(year, month - 1, dayNumber);
+      return buildMovementSegments(points).map((segment, segmentIndex) => {
+        const movementPoints = trimStationaryTrack(segment);
+        const reducedPoints = reduceTrackPoints(movementPoints);
+        const stats = calculateTrackStats(reducedPoints);
+        const track = {
+          id: `${key}-${segmentIndex + 1}`,
+          label: formatTrackLabel(dayDate, stats, segmentIndex),
+          color: TRACK_COLORS[colorIndex % TRACK_COLORS.length],
+          points: reducedPoints,
+          rawPointCount: segment.length,
+          visible: true,
+          startIso: new Date(stats.startTimestamp).toISOString(),
+          endIso: new Date(stats.endTimestamp).toISOString(),
+          stats,
+        };
+        colorIndex += 1;
+        return track;
+      });
     })
     .filter((track) => track.points.length >= 2 && track.stats.distanceMeters >= TRACK_START_DISTANCE_METERS);
+}
+
+function buildMovementSegments(points) {
+  const segments = [];
+  let current = [];
+
+  points.forEach((point) => {
+    const previous = current.at(-1);
+    if (
+      previous &&
+      point.timestamp - previous.timestamp > TRACK_IDLE_GAP_MS &&
+      distanceMeters(previous, point) < TRACK_START_DISTANCE_METERS
+    ) {
+      segments.push(current);
+      current = [];
+    }
+
+    current.push(point);
+  });
+
+  if (current.length) {
+    segments.push(current);
+  }
+
+  return segments;
+}
+
+function trimStationaryTrack(points) {
+  return trimStationaryTrackEnd(trimStationaryTrackStart(points));
 }
 
 function trimStationaryTrackStart(points) {
@@ -293,6 +328,16 @@ function trimStationaryTrackStart(points) {
   return startIndex === -1 ? [] : points.slice(startIndex);
 }
 
+function trimStationaryTrackEnd(points) {
+  if (points.length < 2) {
+    return [];
+  }
+
+  const reversed = [...points].reverse();
+  const trimmed = trimStationaryTrackStart(reversed).reverse();
+  return trimmed.length >= 2 ? trimmed : [];
+}
+
 function averagePosition(a, b) {
   return {
     ...b,
@@ -312,6 +357,40 @@ function trackPointFromRecord(record) {
     ...position,
     timestamp,
     speedKnots: record.sensors?.sim7600?.gnss?.speed_knots ?? record.sensors?.gps?.speed_knots,
+  };
+}
+
+function trackPointsFromRecord(record) {
+  const batch = record?.sensors?.sim7600?.track_points;
+  if (Array.isArray(batch) && batch.length) {
+    const points = batch.map(trackPointFromBatchPoint).filter(Boolean);
+    if (points.length) {
+      return points;
+    }
+  }
+
+  const point = trackPointFromRecord(record);
+  return point ? [point] : [];
+}
+
+function trackPointFromBatchPoint(point) {
+  if (!Array.isArray(point) || point.length < 3) {
+    return null;
+  }
+
+  const timestamp = new Date(point[0]).getTime();
+  const latitude = Number(point[1]);
+  const longitude = Number(point[2]);
+  if (!Number.isFinite(timestamp) || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+    timestamp,
+    speedKnots: Number.isFinite(Number(point[3])) ? Number(point[3]) : null,
+    courseDegrees: Number.isFinite(Number(point[4])) ? Number(point[4]) : null,
   };
 }
 
@@ -466,7 +545,7 @@ function formatTrackMeta(rawPoints, dailyTracks) {
 
   const first = new Date(rawPoints[0].timestamp);
   const last = new Date(rawPoints.at(-1).timestamp);
-  return `${dailyTracks.length} daily tracks from ${formatDate(first)} to ${formatDate(last)}`;
+  return `${dailyTracks.length} tracks from ${formatDate(first)} to ${formatDate(last)}`;
 }
 
 function localDayKey(timestamp) {
@@ -483,6 +562,14 @@ function formatDayLabel(value) {
     month: "short",
     day: "numeric",
   }).format(value);
+}
+
+function formatTrackLabel(day, stats, segmentIndex) {
+  const dayLabel = formatDayLabel(day);
+  if (!Number.isFinite(stats.startTimestamp) || !Number.isFinite(stats.endTimestamp)) {
+    return `${dayLabel} Track ${segmentIndex + 1}`;
+  }
+  return `${dayLabel} ${formatTrackTime(stats.startTimestamp)}-${formatTrackTime(stats.endTimestamp)}`;
 }
 
 function formatDate(value) {

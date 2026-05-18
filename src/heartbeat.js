@@ -105,6 +105,7 @@ export function normalizeCompactHeartbeat(payload, receivedAt = new Date()) {
     audioPeakDb,
     audioImpactCount,
     audioPeakOverRmsDb,
+    trackPoints,
   ] = fields;
 
   return {
@@ -143,6 +144,7 @@ export function normalizeCompactHeartbeat(payload, receivedAt = new Date()) {
           course_degrees: numberOrNull(courseDegrees),
           altitude_meters: numberOrNull(altitudeMeters),
         },
+        track_points: parseTrackPoints(trackPoints),
       },
       arduino_voltage: {
         status: voltageStatus || "unknown",
@@ -203,4 +205,17 @@ function numberOrNull(value) {
 
   const number = Number(value);
   return Number.isNaN(number) ? null : number;
+}
+
+function parseTrackPoints(value) {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const points = JSON.parse(value);
+    return Array.isArray(points) ? points : [];
+  } catch {
+    return [];
+  }
 }
