@@ -61,16 +61,17 @@ async function loadTrackMap() {
   const rawPoints = history.heartbeats
     .flatMap(trackPointsFromRecord)
     .filter(Boolean)
-    .sort((a, b) => a.timestamp - b.timestamp);
+    .sort((a, b) => a.timestamp - b.timestamp || a.sourcePriority - b.sourcePriority);
+  const trackPoints = normalizeTrackPoints(rawPoints);
 
-  tracks = buildDailyTracks(rawPoints);
+  tracks = buildDailyTracks(trackPoints);
   selectedTrackId = tracks[0]?.id;
 
   renderLatestMarker(newest);
   renderTrackLayers();
   renderTrackList();
   selectTrack(selectedTrackId);
-  elements.meta.textContent = formatTrackMeta(rawPoints, tracks);
+  elements.meta.textContent = formatTrackMeta(trackPoints, tracks);
 }
 
 async function fetchJson(path, options) {
@@ -388,7 +389,7 @@ function averagePosition(a, b) {
 
 function trackPointFromRecord(record) {
   const position = getPosition(record);
-  const timestamp = new Date(record?.received_at || record?.sent_at).getTime();
+  const timestamp = new Date(record?.sent_at || record?.received_at).getTime();
   if (!position || !Number.isFinite(timestamp)) {
     return null;
   }
@@ -396,6 +397,7 @@ function trackPointFromRecord(record) {
   return {
     ...position,
     timestamp,
+    sourcePriority: 1,
     speedKnots: record.sensors?.sim7600?.gnss?.speed_knots ?? record.sensors?.gps?.speed_knots,
   };
 }
@@ -429,9 +431,31 @@ function trackPointFromBatchPoint(point) {
     latitude,
     longitude,
     timestamp,
+    sourcePriority: 0,
     speedKnots: Number.isFinite(Number(point[3])) ? Number(point[3]) : null,
     courseDegrees: Number.isFinite(Number(point[4])) ? Number(point[4]) : null,
   };
+}
+
+function normalizeTrackPoints(points) {
+  const byTime = new Map();
+  points.forEach((point) => {
+    const key = Math.round(point.timestamp / 1000);
+    const existing = byTime.get(key);
+    if (!existing || point.sourcePriority < existing.sourcePriority) {
+      byTime.set(key, point);
+    }
+  });
+
+  return [...byTime.values()]
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .filter((point, index, sorted) => {
+      const previous = sorted[index - 1];
+      if (!previous) {
+        return true;
+      }
+      return point.timestamp >= previous.timestamp;
+    });
 }
 
 function reduceTrackPoints(points) {
