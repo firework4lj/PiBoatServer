@@ -278,19 +278,33 @@ function buildDailyTracks(rawPoints) {
 function buildMovementSegments(points) {
   const segments = [];
   let current = [];
+  let idleStartTimestamp = null;
 
   points.forEach((point) => {
     const previous = current.at(-1);
-    if (
-      previous &&
-      point.timestamp - previous.timestamp > TRACK_IDLE_GAP_MS &&
-      distanceMeters(previous, point) < TRACK_START_DISTANCE_METERS
-    ) {
+    if (previous && point.timestamp - previous.timestamp > TRACK_IDLE_GAP_MS) {
       segments.push(current);
-      current = [];
+      current = [point];
+      idleStartTimestamp = null;
+      return;
     }
 
     current.push(point);
+    if (!previous) {
+      return;
+    }
+
+    if (isMovingPair(previous, point)) {
+      idleStartTimestamp = null;
+      return;
+    }
+
+    idleStartTimestamp ??= previous.timestamp;
+    if (point.timestamp - idleStartTimestamp >= TRACK_IDLE_GAP_MS) {
+      segments.push(current);
+      current = [point];
+      idleStartTimestamp = null;
+    }
   });
 
   if (current.length) {
@@ -298,6 +312,12 @@ function buildMovementSegments(points) {
   }
 
   return segments;
+}
+
+function isMovingPair(previous, point) {
+  const movedMeters = distanceMeters(previous, point);
+  const underway = Number.isFinite(point.speedKnots) && point.speedKnots >= TRACK_START_SPEED_KNOTS;
+  return movedMeters >= TRACK_MIN_DISTANCE_METERS || underway;
 }
 
 function trimStationaryTrack(points) {
