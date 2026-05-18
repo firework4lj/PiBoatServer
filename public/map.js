@@ -4,7 +4,8 @@ const TRACK_START_DISTANCE_METERS = 30.48;
 const TRACK_START_SPEED_KNOTS = 1;
 const TRACK_IDLE_GAP_MS = 10 * 60 * 1000;
 const TRACK_MAX_POINTS = 1200;
-const TRACK_COLORS = ["#0f5f78", "#117b4f", "#a15c00", "#6b5bd6", "#b42318", "#1665a7"];
+const TRACK_COLOR = "#7a8790";
+const SELECTED_TRACK_COLOR = "#0f5f78";
 
 const elements = {
   boatName: document.querySelector("#trackBoatName"),
@@ -97,8 +98,8 @@ function renderTrackLayers() {
     }
 
     track.layer = L.polyline(latLngs, {
-      color: track.color,
-      opacity: 0.85,
+      color: TRACK_COLOR,
+      opacity: 0.55,
       weight: 3,
     }).addTo(map);
 
@@ -132,7 +133,7 @@ function renderTrackList() {
       header.className = "track-row-header";
       title.className = "track-row-title";
       color.className = "track-color";
-      color.style.background = track.color;
+      color.style.background = TRACK_COLOR;
       name.textContent = track.label;
       summary.textContent = `${formatTrackTime(track.stats.startTimestamp)} - ${formatTrackTime(track.stats.endTimestamp)}`;
       actions.className = "track-row-actions";
@@ -174,11 +175,33 @@ function selectTrack(trackId) {
   renderTrackStats(track.stats);
   elements.list.querySelectorAll(".track-row").forEach((row) => {
     row.classList.toggle("active", row.dataset.trackId === track.id);
+    const swatch = row.querySelector(".track-color");
+    if (swatch) {
+      swatch.style.background = row.dataset.trackId === track.id ? SELECTED_TRACK_COLOR : TRACK_COLOR;
+    }
   });
+  updateTrackLayerStyles();
 
   if (track.layer) {
     map.fitBounds(track.layer.getBounds(), { maxZoom: 15, padding: [28, 28] });
   }
+}
+
+function updateTrackLayerStyles() {
+  tracks.forEach((track) => {
+    if (!track.layer) {
+      return;
+    }
+    const selected = track.id === selectedTrackId;
+    track.layer.setStyle({
+      color: selected ? SELECTED_TRACK_COLOR : TRACK_COLOR,
+      opacity: selected ? 0.95 : 0.35,
+      weight: selected ? 5 : 3,
+    });
+    if (selected) {
+      track.layer.bringToFront();
+    }
+  });
 }
 
 function setTrackVisible(trackId, visible) {
@@ -247,7 +270,6 @@ function buildDailyTracks(rawPoints) {
     groups.get(key).push(point);
   });
 
-  let colorIndex = 0;
   return [...groups.entries()]
     .sort(([left], [right]) => right.localeCompare(left))
     .flatMap(([key, points]) => {
@@ -260,7 +282,6 @@ function buildDailyTracks(rawPoints) {
         const track = {
           id: `${key}-${segmentIndex + 1}`,
           label: formatTrackLabel(dayDate, stats, segmentIndex),
-          color: TRACK_COLORS[colorIndex % TRACK_COLORS.length],
           points: reducedPoints,
           rawPointCount: segment.length,
           visible: true,
@@ -268,7 +289,6 @@ function buildDailyTracks(rawPoints) {
           endIso: new Date(stats.endTimestamp).toISOString(),
           stats,
         };
-        colorIndex += 1;
         return track;
       });
     })
