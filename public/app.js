@@ -44,6 +44,8 @@ const MIN_VOLTAGE_GAP_MS = 2 * 60 * 1000;
 const MIN_WATT_BUCKET_MS = 2 * 60 * 1000;
 const MAX_WATT_BUCKET_MS = 30 * 60 * 1000;
 const MAX_CHART_POINTS = 1200;
+const AUDIO_EVENT_LIMIT = 25;
+const LISTENED_AUDIO_EVENTS_KEY = "piboat.listenedAudioEvents";
 
 const map = L.map("map", { zoomControl: true }).setView([45.58809, -122.7044], 14);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -68,6 +70,9 @@ let liveCameraActive = false;
 let dashboardRefreshTimer;
 let liveSnapshotTimer;
 let voltageChartState = null;
+let latestAudioEvents = [];
+let pendingAudioEvents = null;
+const listenedAudioEvents = loadListenedAudioEvents();
 
 elements.voltageRanges.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-range-minutes]");
@@ -125,7 +130,7 @@ async function refresh() {
   const historyLimit = VOLTAGE_RANGES[voltageRangeMinutes]?.historyLimit || 420;
   const history = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/history?limit=${historyLimit}`);
   const snapshot = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/snapshot/latest`);
-  const audioEvents = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/audio-events?limit=6`);
+  const audioEvents = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/audio-events?limit=${AUDIO_EVENT_LIMIT}`);
   const liveStatus = await fetchJson(`/api/boats/${encodeURIComponent(selectedBoatId)}/live`);
   const records = Object.values(latest.devices);
   const newest = records.sort((a, b) => new Date(b.received_at) - new Date(a.received_at))[0];
@@ -750,7 +755,17 @@ function renderSnapshot(snapshot) {
 }
 
 function renderAudioEvents(events = []) {
-  elements.audioEventsSummary.textContent = events.length ? `${events.length} recent` : "--";
+  if (audioPlaybackActive()) {
+    pendingAudioEvents = events;
+    const unlistenedCount = countUnlistenedEvents(events);
+    elements.audioEventsSummary.textContent = `${events.length} recent${unlistenedCount ? ` - ${unlistenedCount} new` : ""}`;
+    return;
+  }
+
+  latestAudioEvents = events;
+  pendingAudioEvents = null;
+  const unlistenedCount = countUnlistenedEvents(events);
+  elements.audioEventsSummary.textContent = events.length ? `${events.length} recent${unlistenedCount ? ` - ${unlistenedCount} new` : ""}` : "--";
   if (!events.length) {
     elements.audioEvents.replaceChildren(emptyText("No audio events"));
     return;
@@ -762,21 +777,72 @@ function renderAudioEvents(events = []) {
       const meta = document.createElement("div");
       const title = document.createElement("strong");
       const detail = document.createElement("span");
+      const badge = document.createElement("span");
       const audio = document.createElement("audio");
+      const eventId = audioEventId(event);
+      const listened = listenedAudioEvents.has(eventId);
 
-      row.className = "audio-event-row";
+      row.className = `audio-event-row ${listened ? "listened" : "unlistened"}`;
       meta.className = "audio-event-meta";
       title.textContent = `${titleCase(String(event.trigger || "audio event").replaceAll("_", " "))} - ${formatDate(event.received_at)}`;
       detail.textContent = formatAudioEventDetail(event);
+      badge.className = "audio-event-badge";
+      badge.textContent = listened ? "Listened" : "New";
       audio.controls = true;
       audio.preload = "none";
       audio.src = event.audio_url;
+      audio.addEventListener("play", () => {
+        markAudioEventListened(eventId);
+        row.classList.remove("unlistened");
+        row.classList.add("listened");
+        badge.textContent = "Listened";
+        elements.audioEventsSummary.textContent = `${latestAudioEvents.length} recent${countUnlistenedEvents(latestAudioEvents) ? ` - ${countUnlistenedEvents(latestAudioEvents)} new` : ""}`;
+      });
+      audio.addEventListener("ended", renderPendingAudioEvents);
+      audio.addEventListener("pause", renderPendingAudioEvents);
 
-      meta.append(title, detail);
+      meta.append(title, detail, badge);
       row.append(meta, audio);
       return row;
     }),
   );
+}
+
+function audioPlaybackActive() {
+  return [...elements.audioEvents.querySelectorAll("audio")].some((audio) => !audio.paused && !audio.ended);
+}
+
+function renderPendingAudioEvents() {
+  if (audioPlaybackActive() || !pendingAudioEvents) {
+    return;
+  }
+  renderAudioEvents(pendingAudioEvents);
+}
+
+function audioEventId(event) {
+  return event.audio_url || `${event.device_id || ""}:${event.received_at || ""}:${event.trigger || ""}`;
+}
+
+function countUnlistenedEvents(events) {
+  return events.filter((event) => !listenedAudioEvents.has(audioEventId(event))).length;
+}
+
+function markAudioEventListened(eventId) {
+  listenedAudioEvents.add(eventId);
+  try {
+    localStorage.setItem(LISTENED_AUDIO_EVENTS_KEY, JSON.stringify([...listenedAudioEvents].slice(-500)));
+  } catch (error) {
+    console.warn("could not save listened audio events", error);
+  }
+}
+
+function loadListenedAudioEvents() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LISTENED_AUDIO_EVENTS_KEY) || "[]");
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
 }
 
 function emptyText(text) {

@@ -365,6 +365,15 @@ dd {
   padding: 10px;
 }
 
+.audio-event-row.unlistened {
+  border-color: #8fc5d2;
+  background: #f1fbfd;
+}
+
+.audio-event-row.listened {
+  opacity: 0.76;
+}
+
 .audio-event-meta {
   display: grid;
   gap: 3px;
@@ -378,6 +387,23 @@ dd {
 .empty-text {
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.audio-event-badge {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 800;
+  justify-self: start;
+  padding: 3px 7px;
+}
+
+.audio-event-row.unlistened .audio-event-badge {
+  background: #dff4f8;
+  border-color: #8fc5d2;
+  color: #0f5f78;
 }
 
 .audio-event-row audio {
